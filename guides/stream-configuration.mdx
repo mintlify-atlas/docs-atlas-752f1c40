@@ -1,0 +1,290 @@
+---
+title: Stream configuration
+description: Configure and manage video streams for your IoT devices
+---
+
+Joystick uses MediaMTX as its streaming server to handle video streams from IoT devices. This guide covers how to configure and manage streams.
+
+## Stream basics
+
+Streams are configured per device and use the MediaMTX server to handle video ingestion and distribution.
+
+### Stream properties
+
+Each device stream has the following properties:
+
+- **Stream name**: Unique identifier for the stream (typically matches device name)
+- **Source URL**: The RTSP or other protocol URL from the device
+- **Active slot**: Which connection slot (primary/secondary) is currently active
+- **Ready status**: Whether the stream is currently receiving data
+
+## Configuring a stream
+
+<Steps>
+  <Step title="Configure device connection">
+    Set up the device's host and connection details in the device configuration. The host determines where the stream will be pulled from.
+  </Step>
+
+  <Step title="Set stream name">
+    Configure the stream name in the device's configuration object:
+    ```json
+    {
+      "name": "camera-01",
+      "host": "192.168.1.100",
+      "port": 554
+    }
+    ```
+  </Step>
+
+  <Step title="Configure stream URL template">
+    The stream URL is automatically constructed from device properties. You can customize the URL template in PocketBase hooks to match your device's stream format.
+
+    Common formats:
+    - RTSP: `rtsp://{{host}}:{{port}}/stream`
+    - HTTP: `http://{{host}}:{{port}}/mjpeg`
+    - WebRTC: `webrtc://{{host}}:{{port}}/stream`
+  </Step>
+
+  <Step title="Verify stream connectivity">
+    Check that MediaMTX can reach the device stream:
+    ```bash
+    curl http://localhost:9997/v3/paths/list
+    ```
+
+    Look for your stream name in the returned list and verify its `ready` status is `true`.
+  </Step>
+</Steps>
+
+## Stream modes
+
+Devices can operate in different streaming modes:
+
+### Recording mode
+
+Continuous recording of the stream to disk:
+```bash
+# Enable recording for a stream
+curl -X POST http://localhost:9997/v3/config/paths/patch/camera-01 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "record": true,
+    "recordPath": "/recordings/%path/%Y-%m-%d_%H-%M-%S"
+  }'
+```
+
+### Live streaming mode
+
+Live streaming without recording:
+```bash
+# Disable recording for a stream
+curl -X POST http://localhost:9997/v3/config/paths/patch/camera-01 \
+  -H "Content-Type: application/json" \
+  -d '{"record": false}'
+```
+
+## Dual slot streaming
+
+For devices with dual connection slots, streams can automatically failover between connections.
+
+<Steps>
+  <Step title="Configure dual slots">
+    Set up both primary and secondary connection slots in the device configuration with different hosts.
+  </Step>
+
+  <Step title="Enable automatic switching">
+    Enable `autoSlotSwitch` in the device configuration to allow automatic failover.
+  </Step>
+
+  <Step title="Stream URL updates">
+    When the active slot changes, PocketBase hooks automatically update the stream URL in MediaMTX to point to the new host.
+
+    The system:
+    1. Detects `activeSlot` field changes
+    2. Constructs new stream URL using the active slot's host
+    3. Updates MediaMTX configuration
+    4. Sends notifications about the slot change
+  </Step>
+</Steps>
+
+<Tip>
+  Stream URL updates happen automatically through PocketBase hooks. You don't need to manually reconfigure MediaMTX when switching slots.
+</Tip>
+
+## Accessing streams
+
+### HTTP Live Streaming (HLS)
+
+Access HLS streams for web playback:
+```
+http://localhost:8888/camera-01/index.m3u8
+```
+
+### WebRTC
+
+Access WebRTC streams for low-latency playback:
+```
+webrtc://localhost:8889/camera-01
+```
+
+### RTSP
+
+Access raw RTSP stream:
+```
+rtsp://localhost:8554/camera-01
+```
+
+### Low-Latency HLS (LL-HLS)
+
+For ultra-low latency streaming:
+```
+http://localhost:8888/camera-01/index.m3u8?_HLS_msn=...&_HLS_part=...
+```
+
+## Stream status monitoring
+
+### Check stream health
+
+Query MediaMTX API to check stream status:
+```bash
+curl http://localhost:9997/v3/paths/get/camera-01
+```
+
+Response:
+```json
+{
+  "name": "camera-01",
+  "ready": true,
+  "readyTime": "2026-03-02T10:30:00Z",
+  "bytesReceived": 1024000,
+  "bytesSent": 512000
+}
+```
+
+### Monitor all streams
+
+List all active streams:
+```bash
+curl http://localhost:9997/v3/paths/list
+```
+
+<Warning>
+  The MediaMTX API uses port 9997 by default. Make sure this port is accessible from your Joystick services.
+</Warning>
+
+## Stream automation with Baker
+
+The Baker service can automatically toggle streams on and off based on schedules.
+
+### Time-based streaming
+
+Configure a device to stream only during specific hours:
+
+```json
+{
+  "automationType": "timeOfDay",
+  "on": {
+    "utcDate": "08:00",
+    "mode": "recording"
+  },
+  "off": {
+    "utcDate": "18:00",
+    "mode": "off"
+  }
+}
+```
+
+### Duration-based streaming
+
+Configure periodic streaming cycles:
+
+```json
+{
+  "automationType": "duration",
+  "on": {
+    "minutes": 30,
+    "mode": "live"
+  },
+  "off": {
+    "minutes": 10,
+    "mode": "off"
+  }
+}
+```
+
+<Tip>
+  Baker automatically updates device status by polling MediaMTX every 5 seconds to check stream readiness.
+</Tip>
+
+## Performance optimization
+
+### Bandwidth management
+
+Optimize stream quality based on network conditions:
+
+**High quality** (for local networks):
+```yaml
+rtspTransport: tcp
+runOnReady: ffmpeg -i rtsp://localhost:$RTSP_PORT/$MTX_PATH -c:v libx264 -preset ultrafast -b:v 4M -f rtsp rtsp://localhost:$RTSP_PORT/$MTX_PATH_processed
+```
+
+**Low bandwidth** (for remote access):
+```yaml
+runOnReady: ffmpeg -i rtsp://localhost:$RTSP_PORT/$MTX_PATH -c:v libx264 -preset veryfast -b:v 500k -s 640x480 -f rtsp rtsp://localhost:$RTSP_PORT/$MTX_PATH_processed
+```
+
+### Connection pooling
+
+MediaMTX automatically manages connection pooling. Configure limits in `mediamtx.yml`:
+
+```yaml
+paths:
+  all:
+    readBufferCount: 512
+    maxReaders: 100
+```
+
+## Troubleshooting
+
+### Stream not appearing
+
+1. Verify device is configured with correct host:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/DEVICE_ID
+   ```
+
+2. Check MediaMTX can reach the device:
+   ```bash
+   ffmpeg -i rtsp://DEVICE_HOST:PORT/stream -frames:v 1 test.jpg
+   ```
+
+3. Check MediaMTX logs:
+   ```bash
+   docker logs mediamtx
+   ```
+
+### Stream stops unexpectedly
+
+1. Check device health:
+   ```bash
+   curl http://localhost:8080/api/health/DEVICE_ID
+   ```
+
+2. Verify network connectivity between MediaMTX and device
+
+3. Check for slot switching events in Switcher logs:
+   ```bash
+   docker logs switcher
+   ```
+
+### High latency
+
+1. Use WebRTC instead of HLS for lower latency
+
+2. Reduce buffering in MediaMTX configuration:
+   ```yaml
+   readBufferCount: 64  # Lower value = lower latency
+   ```
+
+3. Check network conditions between viewer and MediaMTX
+
+4. Consider using LL-HLS for a balance between compatibility and latency

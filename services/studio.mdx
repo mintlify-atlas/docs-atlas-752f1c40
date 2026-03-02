@@ -1,0 +1,381 @@
+---
+title: Studio service
+description: Media management and event harvesting service
+---
+
+Studio is a flexible media management service that handles file uploads, event harvesting, thumbnail generation, and hook-based automation for device media.
+
+## Overview
+
+Studio provides multiple methods for publishing media events from devices, including file-based uploads, direct HTTP uploads, and automatic harvesting. It supports any file type with optional thumbnails and configurable device actions.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+studio:
+  image: ghcr.io/skylineagle/joystick/studio:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - POCKETBASE_URL=http://pocketbase:8090
+    - JOYSTICK_API_URL=http://joystick:8000
+    - PORT=8001
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8001` |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+| `JOYSTICK_API_URL` | Joystick service URL | Required |
+
+## Directory structure
+
+Studio creates a directory structure for each device:
+
+```
+data/gallery/
+  ├── device1/
+  │   ├── incoming/     # Drop new files here
+  │   ├── processed/    # Successfully processed files
+  │   └── thumbnails/   # Optional thumbnail files
+  └── device2/
+      ├── incoming/
+      ├── processed/
+      └── thumbnails/
+```
+
+## Features
+
+### Flexible media support
+
+- **Any file type** - Images, videos, audio, documents, and more
+- **Optional thumbnails** - Works with devices that don't generate thumbnails
+- **Media type detection** - Automatic classification based on file extensions
+- **File size tracking** - Monitors file sizes and metadata
+
+### Dynamic device actions
+
+- **Configurable actions** - Use any PocketBase-configured action
+- **Fallback actions** - Tries `list-events`, `list-files`, `list-media`
+- **Parameter templating** - Support for dynamic parameters in commands
+- **Flexible output parsing** - Handles various output formats
+
+### Event publishing methods
+
+1. **File-based upload** - Directory-based file upload system
+2. **Harvesting** - Automatic polling of device events
+3. **Direct upload** - HTTP POST endpoint with files
+4. **URL-based upload** - Pre-signed URLs for secure uploads
+
+## API endpoints
+
+### Media management
+
+#### Get device paths
+
+```http
+GET /api/gallery/:device/paths
+```
+
+Get device-specific upload paths.
+
+**Response:**
+```json
+{
+  "success": true,
+  "paths": {
+    "incoming": "/path/to/data/gallery/device123/incoming",
+    "thumbnails": "/path/to/data/gallery/device123/thumbnails"
+  }
+}
+```
+
+#### List events
+
+```http
+GET /api/gallery/:device/events
+```
+
+List media events with type filtering.
+
+#### Start service
+
+```http
+POST /api/gallery/:device/start
+```
+
+Start media harvesting service with flexible configuration.
+
+#### Stop service
+
+```http
+POST /api/gallery/:device/stop
+```
+
+Stop media harvesting service.
+
+#### Get status
+
+```http
+GET /api/gallery/:device/status
+```
+
+Get service running status.
+
+#### Pull event
+
+```http
+POST /api/gallery/:device/pull/:eventId
+```
+
+Pull specific event from device.
+
+#### Get statistics
+
+```http
+GET /api/gallery/:device/stats
+```
+
+Get media statistics with type breakdown.
+
+#### Delete event
+
+```http
+DELETE /api/gallery/:device/events/:eventId
+```
+
+Delete media event.
+
+### Event upload
+
+#### Direct upload
+
+```http
+POST /api/gallery/:device/upload
+```
+
+Upload event files directly.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8001/api/gallery/device123/upload" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "name=capture.jpg" \
+  -F "event=@/path/to/capture.jpg" \
+  -F "media_type=image" \
+  -F "metadata={\"timestamp\":\"2024-03-20T10:00:00Z\"}"
+```
+
+#### Get upload URL
+
+```http
+GET /api/gallery/:device/upload-url
+```
+
+Get pre-signed upload URLs.
+
+**Response:**
+```json
+{
+  "success": true,
+  "upload_url": "https://...",
+  "thumbnail_upload_url": "https://..."
+}
+```
+
+### Hook management
+
+#### List hooks
+
+```http
+GET /api/hooks
+```
+
+List all hooks with optional device filter.
+
+#### Create hook
+
+```http
+POST /api/hooks
+```
+
+Create new hook.
+
+**Request body:**
+```json
+{
+  "name": "Process on upload",
+  "eventType": "after_event_processed",
+  "deviceId": "device123",
+  "actionName": "process-media",
+  "enabled": true
+}
+```
+
+#### Update hook
+
+```http
+PATCH /api/hooks/:id
+```
+
+Update existing hook.
+
+#### Delete hook
+
+```http
+DELETE /api/hooks/:id
+```
+
+Delete hook.
+
+### File watcher management
+
+#### Get watcher status
+
+```http
+GET /api/watchers
+```
+
+Get status of all file watchers.
+
+#### Refresh watchers
+
+```http
+POST /api/watchers/refresh
+```
+
+Restart all file watchers.
+
+#### Sync watchers
+
+```http
+POST /api/watchers/sync
+```
+
+Sync watchers with current device list.
+
+#### Add device watcher
+
+```http
+POST /api/watchers/:deviceId/add
+```
+
+Add watcher for specific device.
+
+#### Remove watcher
+
+```http
+DELETE /api/watchers/:deviceId
+```
+
+Remove watcher for device.
+
+## Hook event types
+
+Studio supports 7 hook event types:
+
+1. `after_event_pulled` - After event pulled from device
+2. `after_all_events_pulled` - After all events in batch processed
+3. `after_event_processed` - After event processed and stored
+4. `after_thumbnail_generated` - After thumbnail generated
+5. `on_file_detected` - When new file detected in incoming directory
+6. `on_error` - When error occurs during processing
+7. `on_service_start` - When media service starts for device
+
+## File-based upload workflow
+
+1. Get device paths
+2. Copy event file to incoming directory
+3. Optionally copy thumbnail with same name
+4. Studio detects new file
+5. Creates gallery record with metadata
+6. Moves file to processed directory
+7. Triggers appropriate hooks
+
+**Example script:**
+```bash
+#!/bin/bash
+EVENT_FILE=$1
+DEVICE_ID="device123"
+
+# Get device paths
+PATHS=$(curl -s "http://localhost:8001/api/gallery/$DEVICE_ID/paths")
+INCOMING_PATH=$(echo $PATHS | jq -r '.paths.incoming')
+
+# Copy event file
+cp "$EVENT_FILE" "$INCOMING_PATH/"
+```
+
+## Parameter templating
+
+Action commands support dynamic parameter injection:
+
+- `{{device_id}}` - Current device ID
+- `{{event_name}}` - Event filename
+- `{{media_type}}` - Media type (image, video, audio)
+- `{{file_path}}` - Full file path
+- `{{timestamp}}` - Current timestamp
+- `{{date}}` - Current date (YYYY-MM-DD)
+
+**Example:**
+```bash
+ffmpeg -i {{file_path}} -vf scale=640:480 /processed/{{event_name}}
+```
+
+## Device action examples
+
+### List events
+
+```bash
+# Basic list
+ls -la /events
+
+# With date filtering
+find /events -name "*.jpg" -newermt "2024-03-01" -ls
+
+# Recent events (last 24 hours)
+find /events -type f -mtime -1 -ls
+```
+
+### Remove events
+
+```bash
+# Remove specific event
+rm -f /events/{{event_name}}
+
+# Remove old events (30+ days)
+find /events -type f -mtime +30 -delete
+
+# Remove by size (100MB+)
+find /events -type f -size +100M -delete
+```
+
+## File watcher system
+
+Studio automatically manages file watchers for all devices:
+
+- **Auto-initialization** - Watchers created on startup
+- **Periodic sync** - Syncs every 5 minutes
+- **Graceful cleanup** - Removes orphaned watchers
+- **Error recovery** - Automatic watcher restart
+
+## Traefik routing
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.studio.rule=Host(${HOST}) && PathPrefix(`/studio`)"
+  - "traefik.http.middlewares.studio-strip.stripprefix.prefixes=/studio"
+  - "traefik.http.routers.studio.middlewares=studio-strip,cors"
+```

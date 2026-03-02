@@ -1,0 +1,434 @@
+---
+title: Action system
+description: Execute commands on IoT devices with parameter templating and target selection
+---
+
+## Overview
+
+Actions are executable commands in Joystick that can run either on the remote device via SSH or locally on the Joystick server. They support dynamic parameter substitution and flexible targeting.
+
+## Action structure
+
+Actions are defined in two parts:
+
+1. **Action definition** - The base action template
+2. **Run configuration** - Device-specific command mapping
+
+### Action definition
+
+```typescript packages/core/src/types/db.types.ts
+export type ActionsRecord = {
+  id: string;
+  name: string;
+  created?: IsoDateString;
+  updated?: IsoDateString;
+};
+```
+
+<ParamField path="name" type="string" required>
+  Unique identifier for the action (e.g., "reboot", "set-mode", "capture-image")
+</ParamField>
+
+### Run configuration
+
+The `run` collection maps actions to specific devices with executable commands:
+
+```typescript packages/core/src/types/db.types.ts
+export type RunRecord<Tparameters = unknown> = {
+  id: string;
+  action: RecordIdString;      // Reference to action
+  device: RecordIdString;      // Reference to device model
+  command: string;             // Command template with parameters
+  target: RunTargetOptions;    // "device" or "local"
+  parameters?: null | Tparameters;  // JSON Schema for validation
+};
+```
+
+<Accordion title="Run configuration fields">
+  <ParamField path="action" type="string" required>
+    ID of the action to execute
+  </ParamField>
+  
+  <ParamField path="device" type="string" required>
+    ID of the device model (not device instance)
+  </ParamField>
+  
+  <ParamField path="command" type="string" required>
+    Command template with parameter placeholders (e.g., `reboot -t $seconds`)
+  </ParamField>
+  
+  <ParamField path="target" type="enum" required>
+    Execution target:
+    - `device` - Run via SSH on the remote device
+    - `local` - Run on the Joystick server
+  </ParamField>
+  
+  <ParamField path="parameters" type="object">
+    JSON Schema defining required/optional parameters and validation rules
+  </ParamField>
+</Accordion>
+
+## Parameter templating
+
+Action commands support dynamic parameter substitution using the `$variable` syntax.
+
+### Built-in parameters
+
+These parameters are automatically available in all action commands:
+
+<CodeGroup>
+```typescript Device parameters
+{
+  device: "device_id",           // Current device ID
+  userId: "user_id",             // Authenticated user ID
+  ...device.information          // All device information fields
+}
+```
+
+```typescript Service endpoints
+{
+  mediamtx: "http://host.docker.internal:9997",
+  switcher: "http://switcher:8080"
+}
+```
+</CodeGroup>
+
+### Parameter resolution
+
+The `parseActionCommand` function replaces placeholders with actual values:
+
+```typescript packages/core/src/action.ts
+export function parseActionCommand(
+  device: DeviceResponse,
+  action: string,
+  params?: Record<string, unknown>,
+  auth?: { userId: string }
+) {
+  const defaultParameters = {
+    device: device.id,
+    mediamtx: STREAM_API_URL,
+    switcher: SWITCHER_API_URL,
+    userId: auth?.userId,
+    ...device.information,
+  };
+
+  const command = Object.entries({
+    ...defaultParameters,
+    ...params,
+  }).reduce((acc, [key, value]) => {
+    if (acc.includes(`$${key}`)) {
+      return acc.replaceAll(`$${key}`, String(value));
+    }
+    return acc;
+  }, action);
+
+  return command;
+}
+```
+
+### Parameter examples
+
+<Tabs>
+  <Tab title="User parameters">
+    Custom parameters passed in the API request:
+
+    ```json
+    {
+      "command": "reboot -t $delay",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "delay": { "type": "number" }
+        },
+        "required": ["delay"]
+      }
+    }
+    ```
+
+    API call:
+    ```bash
+    curl -X POST http://localhost:8000/api/run/device_id/reboot \
+      -H "Authorization: Bearer TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"delay": 10}'
+    ```
+
+    Result: `reboot -t 10`
+  </Tab>
+
+  <Tab title="Device information">
+    Access device connection details:
+
+    ```json
+    {
+      "command": "ssh $user@$host 'systemctl restart service'",
+      "target": "local"
+    }
+    ```
+
+    With device information:
+    ```json
+    {
+      "user": "root",
+      "host": "192.168.1.100"
+    }
+    ```
+
+    Result: `ssh root@192.168.1.100 'systemctl restart service'`
+  </Tab>
+
+  <Tab title="Service URLs">
+    Access internal service endpoints:
+
+    ```json
+    {
+      "command": "curl -X POST $mediamtx/v3/config/paths/add/$device",
+      "target": "local"
+    }
+    ```
+
+    Result: `curl -X POST http://host.docker.internal:9997/v3/config/paths/add/device_id`
+  </Tab>
+
+  <Tab title="User context">
+    Include authenticated user information:
+
+    ```json
+    {
+      "command": "logger 'Action executed by user $userId'",
+      "target": "device"
+    }
+    ```
+
+    Result: `logger 'Action executed by user abc123'`
+  </Tab>
+</Tabs>
+
+## Execution targets
+
+Actions can run in two different contexts:
+
+### Device target
+
+Commands execute via SSH on the remote device:
+
+```typescript packages/joystick/src/index.ts
+if (run.target === RunTargetOptions.device) {
+  output = await runCommandOnDevice(device, command);
+}
+```
+
+The SSH connection uses the active slot configuration:
+
+```typescript packages/core/src/ssh.ts
+export async function runCommandOnDevice(
+  device: DeviceResponse,
+  command: string
+) {
+  const { host } = getActiveDeviceConnection(device.information);
+  const { user, password, port = 22, key } = device.information;
+
+  // SSH with key, password, or default authentication
+  const result = key
+    ? await $`ssh -i ${keyFileName} -o StrictHostKeyChecking=no -p ${port} ${user}@${host} '${command}'`.text()
+    : password
+    ? await $`sshpass -p ${password} ssh -o StrictHostKeyChecking=no -p ${port} ${user}@${host} '${command}'`.text()
+    : await $`ssh -o StrictHostKeyChecking=no -p ${port} ${user}@${host} '${command}'`.text();
+
+  return result;
+}
+```
+
+<Info>
+  Device commands automatically use the active SIM slot connection. See [Device Management](/concepts/devices#dual-sim-slot-management) for details.
+</Info>
+
+### Local target
+
+Commands execute on the Joystick server:
+
+```typescript packages/joystick/src/index.ts
+if (run.target === RunTargetOptions.local) {
+  output = await $`${{ raw: command }}`.text();
+}
+```
+
+<Warning>
+  Local commands run with the permissions of the Joystick service. Use caution with privileged operations.
+</Warning>
+
+## Parameter validation
+
+The `parameters` field in the run configuration accepts a JSON Schema for validation:
+
+```json
+{
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["standby", "active", "recording"]
+      },
+      "quality": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10
+      },
+      "enabled": {
+        "type": "boolean"
+      }
+    },
+    "required": ["mode"]
+  }
+}
+```
+
+Validation happens before execution:
+
+```typescript packages/joystick/src/index.ts
+if (run.parameters) {
+  if (!body) throw new Error("Parameters are required for this action");
+  if (!validate(body, run.parameters)) {
+    throw new Error("Invalid parameters for this action");
+  }
+}
+```
+
+## Executing actions
+
+Actions are executed via the REST API:
+
+```http
+POST /api/run/:device/:action
+Authorization: Bearer YOUR_JWT_TOKEN
+Content-Type: application/json
+
+{
+  "param1": "value1",
+  "param2": "value2"
+}
+```
+
+### Execution flow
+
+1. **Authentication** - Verify user has access to the device
+2. **Device lookup** - Retrieve device configuration
+3. **Action lookup** - Find action by name
+4. **Run mapping** - Get command template for device model
+5. **Validation** - Check parameters against JSON Schema
+6. **Parsing** - Replace parameter placeholders
+7. **Execution** - Run on device or locally based on target
+8. **Logging** - Record execution details in `action_logs`
+
+### Response format
+
+<Tabs>
+  <Tab title="Success">
+    ```json
+    {
+      "success": true,
+      "output": "Command output here"
+    }
+    ```
+  </Tab>
+
+  <Tab title="Error">
+    ```json
+    {
+      "success": false,
+      "error": "Device device_id not found"
+    }
+    ```
+
+    HTTP Status: 500
+  </Tab>
+</Tabs>
+
+## Action examples
+
+### Mode switching
+
+```json
+{
+  "action": "set-mode",
+  "device": "model_id",
+  "command": "mode-switch.sh $mode",
+  "target": "device",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": ["standby", "active", "recording"]
+      }
+    },
+    "required": ["mode"]
+  }
+}
+```
+
+### Stream configuration
+
+```json
+{
+  "action": "configure-stream",
+  "device": "model_id",
+  "command": "curl -X POST $mediamtx/v3/config/paths/add/$device -d '{\"source\": \"$source\"}'",
+  "target": "local",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source": { "type": "string" }
+    },
+    "required": ["source"]
+  }
+}
+```
+
+### File transfer
+
+```json
+{
+  "action": "backup-logs",
+  "device": "model_id",
+  "command": "tar -czf /tmp/logs-$device.tar.gz /var/log && scp /tmp/logs-$device.tar.gz backup@$host:/backups/",
+  "target": "device",
+  "parameters": null
+}
+```
+
+## Action logging
+
+All action executions are logged to the `action_logs` collection:
+
+```typescript
+{
+  user: "user_id",
+  device: "device_id",
+  action: "action_id",
+  parameters: { mode: "active" },
+  result: { 
+    success: true, 
+    output: "Mode changed successfully" 
+  },
+  execution_time: 1234,
+  ip_address: "192.168.1.50",
+  user_agent: "Mozilla/5.0..."
+}
+```
+
+<Note>
+  Execution time is measured in milliseconds and includes network latency for remote device commands.
+</Note>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Devices" icon="microchip" href="/concepts/devices">
+    Configure device connections and information
+  </Card>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    Secure action execution with auth
+  </Card>
+</CardGroup>

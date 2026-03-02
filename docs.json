@@ -1,122 +1,134 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Joystick",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#0ea5e9",
+    "light": "#38bdf8",
+    "dark": "#0284c7"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/skylineagle/joystick"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/skylineagle/joystick"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/devices",
+              "concepts/actions",
+              "concepts/streaming",
+              "concepts/authentication"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/device-setup",
+              "guides/stream-configuration",
+              "guides/media-management",
+              "guides/slot-switching",
+              "guides/notifications",
+              "guides/scheduling"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Services",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Microservices",
             "pages": [
-              "api-reference/introduction"
+              "services/overview",
+              "services/joystick",
+              "services/studio",
+              "services/switcher",
+              "services/baker",
+              "services/whisper",
+              "services/panel"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Infrastructure",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "services/pocketbase",
+              "services/mediamtx",
+              "services/traefik"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Joystick API",
+            "pages": [
+              "api/authentication",
+              "api/device-control",
+              "api/sensor-data",
+              "api/notifications"
+            ]
+          },
+          {
+            "group": "Studio API",
+            "pages": [
+              "api/studio/overview",
+              "api/studio/media-management",
+              "api/studio/hooks",
+              "api/studio/file-watchers"
+            ]
+          },
+          {
+            "group": "Switcher API",
+            "pages": [
+              "api/switcher/slot-control",
+              "api/switcher/health-checks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deployment",
+        "groups": [
+          {
+            "group": "Setup",
+            "pages": [
+              "deployment/installation",
+              "deployment/configuration",
+              "deployment/docker-compose"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "deployment/monitoring",
+              "deployment/troubleshooting",
+              "deployment/security"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

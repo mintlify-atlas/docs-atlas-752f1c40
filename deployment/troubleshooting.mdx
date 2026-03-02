@@ -1,0 +1,457 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for Joystick IoT platform
+---
+
+## Docker issues
+
+### Containers won't start
+
+**Symptom**: Services fail to start or immediately exit.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Check container logs">
+    ```bash
+    docker-compose logs <service_name>
+    ```
+
+    Look for error messages indicating the cause of failure.
+  </Step>
+
+  <Step title="Verify port availability">
+    Ensure required ports are not already in use:
+    ```bash
+    # Check if ports are in use
+    netstat -tuln | grep -E ':(80|8080|8090|9997)'
+    ```
+
+    If ports are in use, either stop the conflicting service or change ports in docker-compose.yml.
+  </Step>
+
+  <Step title="Check Docker daemon">
+    Verify Docker is running:
+    ```bash
+    docker info
+    ```
+
+    Restart Docker if needed:
+    ```bash
+    # Linux
+    sudo systemctl restart docker
+    
+    # macOS/Windows
+    # Restart Docker Desktop
+    ```
+  </Step>
+
+  <Step title="Verify image availability">
+    Pull images manually to check for download issues:
+    ```bash
+    docker-compose pull
+    ```
+  </Step>
+</Steps>
+
+### Permission denied errors
+
+**Symptom**: "Permission denied" errors when accessing Docker socket or volumes.
+
+**Solutions**:
+
+```bash
+# Linux: Add user to docker group
+sudo usermod -aG docker $USER
+
+# Log out and back in for changes to take effect
+
+# Verify Docker socket permissions
+ls -l /var/run/docker.sock
+```
+
+For Dozzle specifically:
+```bash
+# Ensure Docker socket is accessible
+sudo chmod 666 /var/run/docker.sock
+```
+
+### Out of disk space
+
+**Symptom**: "no space left on device" errors.
+
+**Solutions**:
+
+```bash
+# Check Docker disk usage
+docker system df
+
+# Remove unused images
+docker image prune -a
+
+# Remove unused volumes
+docker volume prune
+
+# Remove stopped containers
+docker container prune
+
+# Remove everything unused
+docker system prune -a --volumes
+```
+
+## Connectivity issues
+
+### Services can't communicate
+
+**Symptom**: Services cannot reach each other (e.g., "connection refused").
+
+**Solutions**:
+
+<Steps>
+  <Step title="Verify network configuration">
+    Check that all services are on the same network:
+    ```bash
+    docker network inspect joystick_app-network
+    ```
+  </Step>
+
+  <Step title="Check service names">
+    Ensure environment variables use correct service names:
+    - `http://pocketbase:8090` (not `localhost:8090`)
+    - `http://joystick:8000` (not `127.0.0.1:8000`)
+  </Step>
+
+  <Step title="Verify health checks">
+    Check if dependent services are healthy:
+    ```bash
+    docker-compose ps
+    ```
+
+    PocketBase should show "healthy" status before other services start.
+  </Step>
+
+  <Step title="Test connectivity">
+    Execute a shell in one container and test connectivity:
+    ```bash
+    docker-compose exec joystick sh
+    wget -O- http://pocketbase:8090/api/health
+    ```
+  </Step>
+</Steps>
+
+### Cannot access services from browser
+
+**Symptom**: Services not accessible from `http://localhost`.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Check Traefik routing">
+    View Traefik dashboard at `http://localhost:8080` to verify:
+    - Routers are configured
+    - Services are detected
+    - Backends are healthy
+  </Step>
+
+  <Step title="Verify HOST variable">
+    Ensure HOST is set correctly:
+    ```bash
+    echo $HOST
+    # Should output: localhost (or your domain)
+    ```
+
+    If not set:
+    ```bash
+    export HOST=localhost
+    docker-compose up -d
+    ```
+  </Step>
+
+  <Step title="Check port bindings">
+    Verify ports are exposed:
+    ```bash
+    docker-compose ps
+    ```
+
+    Traefik should show `0.0.0.0:80->80/tcp`.
+  </Step>
+</Steps>
+
+### MediaMTX streaming issues
+
+**Symptom**: Video streams not working or not accessible.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Check MediaMTX API">
+    Test the MediaMTX API:
+    ```bash
+    curl http://localhost:9997/v3/config/global/get
+    ```
+  </Step>
+
+  <Step title="Verify stream paths">
+    List active streams:
+    ```bash
+    curl http://localhost:9997/v3/paths/list
+    ```
+  </Step>
+
+  <Step title="Check firewall rules">
+    Ensure RTSP (8554), RTMP (1935), and HLS (8888) ports are open:
+    ```bash
+    # Linux
+    sudo ufw status
+    sudo ufw allow 8554/tcp
+    sudo ufw allow 1935/tcp
+    sudo ufw allow 8888/tcp
+    ```
+  </Step>
+
+  <Step title="Review MediaMTX logs">
+    ```bash
+    docker-compose logs -f mediamtx
+    ```
+
+    Look for authentication errors or connection issues.
+  </Step>
+</Steps>
+
+## Authentication issues
+
+### API key authentication fails
+
+**Symptom**: Requests return "401 Unauthorized" or "403 Forbidden".
+
+**Solutions**:
+
+<Steps>
+  <Step title="Verify API key">
+    Check that `JOYSTICK_API_KEY` is set correctly in all services:
+    ```bash
+    docker-compose exec pocketbase env | grep JOYSTICK_API_KEY
+    docker-compose exec switcher env | grep JOYSTICK_API_KEY
+    ```
+
+    All should return the same value.
+  </Step>
+
+  <Step title="Test with correct header">
+    ```bash
+    curl -H "X-API-Key: dev-api-key-12345" \
+      http://localhost:8000/api/health
+    ```
+  </Step>
+
+  <Step title="Check for typos">
+    Common mistakes:
+    - Wrong header name (`X-Api-Key` vs `X-API-Key`)
+    - Trailing spaces in environment variables
+    - Quotes in .env file
+  </Step>
+</Steps>
+
+### JWT token authentication fails
+
+**Symptom**: Requests with Bearer token fail.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Get a fresh token">
+    ```bash
+    curl -X POST http://localhost:8090/api/collections/users/auth-with-password \
+      -H "Content-Type: application/json" \
+      -d '{"identity": "user@example.com", "password": "password"}'
+    ```
+  </Step>
+
+  <Step title="Verify token format">
+    JWT tokens should be in the format: `xxxxx.yyyyy.zzzzz`
+  </Step>
+
+  <Step title="Check token expiration">
+    Decode the JWT to check expiration:
+    ```bash
+    # Use jwt.io or a JWT decoder library
+    ```
+
+    Tokens typically expire after 24 hours.
+  </Step>
+</Steps>
+
+## Database issues
+
+### PocketBase initialization fails
+
+**Symptom**: PocketBase container exits or health check fails.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Check PocketBase logs">
+    ```bash
+    docker-compose logs pocketbase
+    ```
+  </Step>
+
+  <Step title="Verify volume permissions">
+    ```bash
+    docker volume inspect joystick_pb_data
+    ```
+  </Step>
+
+  <Step title="Reset PocketBase data">
+    **Warning**: This deletes all data!
+    ```bash
+    docker-compose down
+    docker volume rm joystick_pb_data
+    docker-compose up -d
+    ```
+  </Step>
+</Steps>
+
+### Migration errors
+
+**Symptom**: Migration failures on PocketBase startup.
+
+**Solutions**:
+
+```bash
+# View migration files
+docker-compose exec pocketbase ls /pb_migrations
+
+# Check migration logs
+docker-compose logs pocketbase | grep migration
+```
+
+If migrations are corrupt, restore from backup or recreate the database.
+
+## Performance issues
+
+### High CPU usage
+
+**Symptom**: Containers consuming excessive CPU.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Identify the culprit">
+    ```bash
+    docker stats
+    ```
+
+    Note which container has high CPU usage.
+  </Step>
+
+  <Step title="Check logs for errors">
+    ```bash
+    docker-compose logs -f <high-cpu-service>
+    ```
+
+    Look for error loops or excessive logging.
+  </Step>
+
+  <Step title="Restart the service">
+    ```bash
+    docker-compose restart <service_name>
+    ```
+  </Step>
+</Steps>
+
+### High memory usage
+
+**Symptom**: Containers consuming excessive memory.
+
+**Solutions**:
+
+```bash
+# View memory usage
+docker stats
+
+# Set memory limits in docker-compose.yml
+services:
+  joystick:
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+```
+
+### Slow video streaming
+
+**Symptom**: Video streams lag or buffer frequently.
+
+**Solutions**:
+
+<Steps>
+  <Step title="Use host networking on Linux">
+    ```bash
+    docker-compose -f docker-compose.linux.yml up -d
+    ```
+  </Step>
+
+  <Step title="Check network bandwidth">
+    ```bash
+    # Test network speed
+    docker stats --no-stream
+    ```
+  </Step>
+
+  <Step title="Optimize MediaMTX settings">
+    Edit `mediamtx/mediamtx.yml`:
+    ```yaml
+    hlsVariant: lowLatency
+    hlsPartDuration: 200ms
+    writeQueueSize: 1024  # Increase if needed
+    ```
+  </Step>
+</Steps>
+
+## Common error messages
+
+### "Connection refused"
+
+**Cause**: Target service is not running or not accessible.
+
+**Solution**: Check that the service is running and network configuration is correct.
+
+### "Device not found"
+
+**Cause**: Device ID doesn't exist in PocketBase database.
+
+**Solution**: Verify device exists in PocketBase admin panel.
+
+### "Action not found"
+
+**Cause**: Action name is incorrect or not configured for the device.
+
+**Solution**: Check available actions for the device in PocketBase.
+
+### "Authentication required"
+
+**Cause**: Request missing authentication credentials.
+
+**Solution**: Add `X-API-Key` header or Bearer token to request.
+
+### "Access denied: You don't have permission to control this device"
+
+**Cause**: User doesn't have permission for the device.
+
+**Solution**: Add user ID to device's `allow` field in PocketBase.
+
+## Getting help
+
+If you're still experiencing issues:
+
+1. **Check logs**: Use Dozzle (`http://localhost:8084`) to view all container logs
+2. **Review configuration**: Verify environment variables and service dependencies
+3. **Test incrementally**: Start services one at a time to isolate issues
+4. **Check GitHub issues**: Search for similar problems in the repository
+5. **Provide details**: When reporting issues, include:
+   - Docker version: `docker --version`
+   - Docker Compose version: `docker-compose --version`
+   - Operating system
+   - Relevant logs
+   - Steps to reproduce

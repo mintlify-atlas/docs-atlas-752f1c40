@@ -1,0 +1,332 @@
+---
+title: Health checks
+description: Monitor device connection health and automatic failover status
+---
+
+The health check system monitors the connectivity status of both primary and secondary slots for devices with dual connections, enabling automatic failover when issues are detected.
+
+## Get health status
+
+<Card title="GET /api/health/:deviceId?" icon="heart-pulse">
+  Get health status for a specific device or all monitored devices
+</Card>
+
+### Path parameters
+
+<ParamField path="deviceId" type="string">
+  Optional device identifier. If omitted, returns status for all devices with automatic slot switching enabled.
+</ParamField>
+
+### Response
+
+For a specific device:
+
+<ResponseField name="deviceId" type="string" required>
+  Device identifier
+</ResponseField>
+
+<ResponseField name="activeSlot" type="string" required>
+  Currently active slot: `primary` or `secondary`
+</ResponseField>
+
+<ResponseField name="primaryHealth" type="object" required>
+  Health status of the primary slot
+</ResponseField>
+
+<ResponseField name="primaryHealth.healthy" type="boolean">
+  Whether the primary slot is healthy
+</ResponseField>
+
+<ResponseField name="primaryHealth.failures" type="number">
+  Consecutive failure count for primary slot
+</ResponseField>
+
+<ResponseField name="primaryHealth.lastCheck" type="string">
+  ISO 8601 timestamp of last health check
+</ResponseField>
+
+<ResponseField name="secondaryHealth" type="object" required>
+  Health status of the secondary slot
+</ResponseField>
+
+<ResponseField name="secondaryHealth.healthy" type="boolean">
+  Whether the secondary slot is healthy
+</ResponseField>
+
+<ResponseField name="secondaryHealth.failures" type="number">
+  Consecutive failure count for secondary slot
+</ResponseField>
+
+<ResponseField name="secondaryHealth.lastCheck" type="string">
+  ISO 8601 timestamp of last health check
+</ResponseField>
+
+### Example: Get specific device health
+
+```bash
+curl "http://localhost:8080/api/health/device123" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+{
+  "deviceId": "device123",
+  "activeSlot": "primary",
+  "primaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  },
+  "secondaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  }
+}
+```
+
+### Example: Get all devices health
+
+```bash
+curl "http://localhost:8080/api/health" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+[
+  {
+    "deviceId": "device123",
+    "activeSlot": "primary",
+    "primaryHealth": {
+      "healthy": true,
+      "failures": 0,
+      "lastCheck": "2024-03-20T10:30:00Z"
+    },
+    "secondaryHealth": {
+      "healthy": true,
+      "failures": 0,
+      "lastCheck": "2024-03-20T10:30:00Z"
+    }
+  },
+  {
+    "deviceId": "device456",
+    "activeSlot": "secondary",
+    "primaryHealth": {
+      "healthy": false,
+      "failures": 5,
+      "lastCheck": "2024-03-20T10:29:30Z"
+    },
+    "secondaryHealth": {
+      "healthy": true,
+      "failures": 0,
+      "lastCheck": "2024-03-20T10:30:00Z"
+    }
+  }
+]
+```
+
+## Trigger manual health check
+
+<Card title="POST /api/health/check" icon="stethoscope">
+  Manually trigger health checks for all monitored devices
+</Card>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if health checks were triggered successfully
+</ResponseField>
+
+<ResponseField name="devicesChecked" type="number" required>
+  Number of devices that were checked
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8080/api/health/check" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "devicesChecked": 5
+}
+```
+
+## Health check configuration
+
+### Environment variables
+
+<ParamField query="HEALTH_CHECK_ENABLED" type="boolean" default={true}>
+  Enable or disable automatic health checks
+</ParamField>
+
+<ParamField query="HEALTH_CHECK_INTERVAL" type="number" default={30000}>
+  Interval between health checks in milliseconds (default: 30 seconds)
+</ParamField>
+
+<ParamField query="HEALTH_CHECK_TIMEOUT" type="number" default={5000}>
+  Timeout for each health check in milliseconds (default: 5 seconds)
+</ParamField>
+
+### Example configuration
+
+```bash
+export HEALTH_CHECK_ENABLED=true
+export HEALTH_CHECK_INTERVAL=30000
+export HEALTH_CHECK_TIMEOUT=5000
+```
+
+## Health check process
+
+### Check execution
+
+1. **Device discovery** - Find devices with `autoSlotSwitch=true` and configured secondary slots
+2. **Slot testing** - Run `slot-check` action against both primary and secondary hosts
+3. **Result evaluation** - Determine if each slot is healthy based on response
+4. **Failure tracking** - Increment failure counter for unhealthy slots
+5. **Failover decision** - Switch slots after 2 consecutive failures
+
+### Failover trigger
+
+Automatic failover occurs when:
+
+- Current active slot has 2+ consecutive failures
+- Alternate slot is healthy (last check succeeded)
+- Device has `autoSlotSwitch` enabled
+
+### Recovery
+
+Automatic recovery occurs when:
+
+- Previously failed slot becomes healthy again
+- System can switch back to preferred slot (typically primary)
+- Failure counter is reset after successful checks
+
+## Monitoring scenarios
+
+### Normal operation
+
+```json
+{
+  "deviceId": "device123",
+  "activeSlot": "primary",
+  "primaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  },
+  "secondaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  }
+}
+```
+
+### Primary slot degraded
+
+```json
+{
+  "deviceId": "device123",
+  "activeSlot": "primary",
+  "primaryHealth": {
+    "healthy": false,
+    "failures": 1,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  },
+  "secondaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:30:00Z"
+  }
+}
+```
+
+### Failover completed
+
+```json
+{
+  "deviceId": "device123",
+  "activeSlot": "secondary",
+  "primaryHealth": {
+    "healthy": false,
+    "failures": 2,
+    "lastCheck": "2024-03-20T10:31:00Z"
+  },
+  "secondaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:31:00Z"
+  }
+}
+```
+
+### Recovery in progress
+
+```json
+{
+  "deviceId": "device123",
+  "activeSlot": "secondary",
+  "primaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:35:00Z"
+  },
+  "secondaryHealth": {
+    "healthy": true,
+    "failures": 0,
+    "lastCheck": "2024-03-20T10:35:00Z"
+  }
+}
+```
+
+## Integration with notifications
+
+The health check system can trigger notifications through hooks:
+
+- Slot switch notifications when failover occurs
+- Alert notifications when both slots are unhealthy
+- Recovery notifications when failed slots become healthy
+
+## Troubleshooting
+
+### Health checks not running
+
+Verify environment variables:
+
+```bash
+curl "http://localhost:8080/api/health" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+If no devices are returned, check:
+- `autoSlotSwitch` is enabled in device configuration
+- Secondary slot is configured (`secondSlotHost` is set)
+- `HEALTH_CHECK_ENABLED=true` in environment
+
+### Frequent slot switching
+
+If devices are switching slots too frequently:
+
+1. Increase `HEALTH_CHECK_INTERVAL` to reduce check frequency
+2. Increase failure threshold (currently 2 consecutive failures)
+3. Increase `HEALTH_CHECK_TIMEOUT` if network is slow
+
+### Slots showing unhealthy incorrectly
+
+Verify the `slot-check` action is configured correctly:
+
+```bash
+# Test the slot-check action manually
+curl -X POST "http://localhost:8000/api/run/device123/slot-check" \
+  -H "X-API-Key: dev-api-key-12345"
+```

@@ -1,0 +1,433 @@
+---
+title: Slot switching
+description: Configure automatic failover between primary and secondary device connections
+---
+
+The slot switching system provides automatic failover capabilities for devices with dual connection slots, ensuring continuous operation even when one connection fails.
+
+## Overview
+
+Slot switching allows devices to automatically failover between primary and secondary network connections based on health check results. This is essential for high-availability IoT deployments.
+
+### Key features
+
+- Automatic health monitoring every 30 seconds
+- Failover after 2 consecutive failures
+- Automatic recovery when failed slot becomes healthy
+- Manual slot switching via API
+- Real-time health status monitoring
+- Automatic stream URL updates
+
+## Configuration
+
+<Steps>
+  <Step title="Configure primary connection">
+    Set up the device's primary connection details:
+    - **Host**: Primary IP address or hostname
+    - **Phone**: Primary phone number (optional)
+  </Step>
+
+  <Step title="Enable secondary slot">
+    In the device configuration, enable "Configure Secondary Connection Slot".
+  </Step>
+
+  <Step title="Configure secondary connection">
+    Provide the secondary connection details:
+    - **Secondary Host**: Backup IP address or hostname  
+    - **Secondary Phone**: Backup phone number (optional)
+
+    <Tip>
+      Use geographically diverse connections when possible to protect against regional network outages.
+    </Tip>
+  </Step>
+
+  <Step title="Enable automatic slot switching">
+    Enable "Enable automatic slot switching" to activate health monitoring and automatic failover.
+  </Step>
+
+  <Step title="Create slot-check action">
+    Define a `slot-check` action in PocketBase that tests connectivity:
+    ```bash
+    curl -X POST "http://localhost:8090/api/collections/actions/records" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "slot-check",
+        "command": "ping -c 1 {{host}} || exit 1"
+      }'
+    ```
+  </Step>
+
+  <Step title="Save and verify">
+    Save the configuration and verify automatic health checks are running:
+    ```bash
+    curl http://localhost:8080/api/health/DEVICE_ID
+    ```
+  </Step>
+</Steps>
+
+## Environment variables
+
+Configure the Switcher service with these environment variables:
+
+```bash
+# Enable/disable health checks
+HEALTH_CHECK_ENABLED=true
+
+# Check interval in milliseconds (default: 30000)
+HEALTH_CHECK_INTERVAL=30000
+
+# Timeout for each check in milliseconds (default: 5000)
+HEALTH_CHECK_TIMEOUT=5000
+
+# API configuration
+JOYSTICK_API_URL=http://joystick:8000
+JOYSTICK_API_KEY=dev-api-key-12345
+POCKETBASE_URL=http://pocketbase:8090
+```
+
+<Warning>
+  Make sure the `JOYSTICK_API_KEY` matches the key configured in your Joystick service for inter-service authentication.
+</Warning>
+
+## How it works
+
+### Health check process
+
+<Steps>
+  <Step title="Service startup">
+    The Switcher service starts the health check loop on startup.
+  </Step>
+
+  <Step title="Device discovery">
+    Every 30 seconds (configurable), the service finds all devices with:
+    - `autoSlotSwitch` enabled
+    - Secondary slot configured
+  </Step>
+
+  <Step title="Health testing">
+    For each device, the service:
+    1. Executes the `slot-check` action against the current active host
+    2. Records success or failure
+    3. Tracks consecutive failure count
+  </Step>
+
+  <Step title="Failure detection">
+    When a slot fails health checks:
+    - Failure counter increments
+    - After 2 consecutive failures, failover is triggered
+  </Step>
+
+  <Step title="Automatic switching">
+    On failover:
+    1. System checks alternate slot health
+    2. If healthy, updates `activeSlot` field in database
+    3. PocketBase hook detects change and updates stream URLs
+    4. Notification sent about slot change
+    5. Failure counter resets
+  </Step>
+
+  <Step title="Continuous monitoring">
+    Health checks continue on both slots to enable automatic recovery.
+  </Step>
+</Steps>
+
+### Failover scenarios
+
+**Primary slot failure**
+
+1. Primary slot health check fails
+2. Failure counter increments (now at 1)
+3. Next check fails again (counter at 2)
+4. System checks secondary slot health
+5. If secondary is healthy, switches to secondary slot
+6. Stream URLs updated to use `secondSlotHost`
+7. Users receive notification about slot change
+
+**Automatic recovery**
+
+1. System continues health checks on both slots
+2. Original failed slot becomes healthy again
+3. System can switch back to primary slot
+4. Seamless transition with minimal interruption
+
+<Tip>
+  Configure your `HEALTH_CHECK_INTERVAL` based on your availability requirements. Shorter intervals mean faster failover but more frequent health checks.
+</Tip>
+
+## Manual slot switching
+
+You can manually switch slots without waiting for automatic failover:
+
+```bash
+# Switch to secondary slot
+curl -X POST http://localhost:8080/api/slot/DEVICE_ID/secondary
+
+# Switch to primary slot
+curl -X POST http://localhost:8080/api/slot/DEVICE_ID/primary
+```
+
+The system validates slot availability before switching and returns an error if the target slot is not configured.
+
+## Health status monitoring
+
+### Check device health
+
+Get real-time health status for a specific device:
+
+```bash
+curl http://localhost:8080/api/health/DEVICE_ID
+```
+
+Response:
+```json
+{
+  "deviceId": "DEVICE_ID",
+  "activeSlot": "primary",
+  "primarySlot": {
+    "healthy": true,
+    "consecutiveFailures": 0,
+    "lastCheck": "2026-03-02T10:30:00Z"
+  },
+  "secondarySlot": {
+    "healthy": true,
+    "consecutiveFailures": 0,
+    "lastCheck": "2026-03-02T10:30:00Z"
+  }
+}
+```
+
+### Check all devices
+
+Get health status for all monitored devices:
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+### Trigger manual health check
+
+Force an immediate health check for all devices:
+
+```bash
+curl -X POST http://localhost:8080/api/health/check
+```
+
+## Frontend integration
+
+The Joystick frontend includes built-in slot health indicators:
+
+### SlotHealthIndicator component
+
+- Shows active slot with visual indicators
+- Displays health status of both primary and secondary slots
+- Auto-refreshes every 30 seconds
+- Integrated into device actions area
+
+### Configuration UI
+
+- Checkbox to enable automatic slot switching
+- Located in secondary slot configuration section
+- Only visible when secondary slot is configured
+- Real-time validation of slot configuration
+
+## Stream URL updates
+
+When the active slot changes, stream URLs are automatically updated through PocketBase hooks:
+
+<Steps>
+  <Step title="Slot change detected">
+    PocketBase hook detects `activeSlot` field change.
+  </Step>
+
+  <Step title="URL construction">
+    System constructs new stream URL using:
+    - `host` field for primary slot
+    - `secondSlotHost` field for secondary slot
+  </Step>
+
+  <Step title="MediaMTX update">
+    Hook updates stream configuration in MediaMTX using the template system.
+  </Step>
+
+  <Step title="Notification">
+    Users receive real-time notification about the slot switch and URL update.
+  </Step>
+</Steps>
+
+## Testing
+
+### Test automatic failover
+
+<Steps>
+  <Step title="Simulate primary failure">
+    Disconnect the primary connection or block its IP address:
+    ```bash
+    # On firewall/router
+    iptables -A INPUT -s PRIMARY_HOST_IP -j DROP
+    ```
+  </Step>
+
+  <Step title="Monitor health checks">
+    Watch the health status:
+    ```bash
+    watch -n 5 'curl -s http://localhost:8080/api/health/DEVICE_ID | jq'
+    ```
+  </Step>
+
+  <Step title="Verify failover">
+    After 2 failed checks (~60 seconds), verify:
+    - Active slot changed to "secondary"
+    - Stream is using secondary host
+    - Notification was sent
+  </Step>
+
+  <Step title="Test recovery">
+    Restore primary connection:
+    ```bash
+    # Remove firewall rule
+    iptables -D INPUT -s PRIMARY_HOST_IP -j DROP
+    ```
+
+    System should detect recovery and can switch back to primary.
+  </Step>
+</Steps>
+
+### Test script
+
+Use the provided test script:
+
+```bash
+./test-slot-switching.sh
+```
+
+This script tests:
+- Service health endpoints
+- Manual slot switching  
+- Health check triggers
+- Device status queries
+
+## Monitoring and logging
+
+### Switcher service logs
+
+The Switcher service provides detailed logging:
+
+```bash
+# View real-time logs
+docker logs -f switcher
+
+# Search for slot switching events
+docker logs switcher 2>&1 | grep "slot switching"
+
+# Check for health check failures
+docker logs switcher 2>&1 | grep "health check failed"
+```
+
+Log entries include:
+- Health check results for each device
+- Slot switching events with timestamps
+- Failure tracking and counters
+- API request details
+
+### Health status dashboard
+
+Monitor system-wide status:
+
+```bash
+# Get overview of all devices
+curl http://localhost:8080/api/health | jq
+
+# Filter for devices with failures
+curl http://localhost:8080/api/health | jq '.[] | select(.primarySlot.consecutiveFailures > 0)'
+
+# Check devices on secondary slot
+curl http://localhost:8080/api/health | jq '.[] | select(.activeSlot == "secondary")'
+```
+
+## Troubleshooting
+
+### Health checks not running
+
+1. Verify health checks are enabled:
+   ```bash
+   # Check Switcher environment
+   docker exec switcher env | grep HEALTH_CHECK
+   ```
+
+2. Check Switcher service logs for errors:
+   ```bash
+   docker logs switcher | grep -i error
+   ```
+
+3. Ensure devices have `autoSlotSwitch` enabled:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/DEVICE_ID | jq .autoSlotSwitch
+   ```
+
+### Slot switching not working
+
+1. Verify secondary slot is configured:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/DEVICE_ID | jq '.secondSlotHost'
+   ```
+
+2. Check `slot-check` action exists:
+   ```bash
+   curl "http://localhost:8090/api/collections/actions/records?filter=name='slot-check'"
+   ```
+
+3. Verify API connectivity between services:
+   ```bash
+   docker exec switcher curl http://joystick:8000/api/health
+   ```
+
+4. Check API key is correct:
+   ```bash
+   docker exec switcher env | grep JOYSTICK_API_KEY
+   ```
+
+### UI not showing slot status
+
+1. Check Switcher health endpoint accessibility:
+   ```bash
+   curl http://localhost:8080/api/health/DEVICE_ID
+   ```
+
+2. Verify device has both slots configured
+
+3. Ensure `autoSlotSwitch` is enabled
+
+4. Check browser console for API errors
+
+### False positive failures
+
+1. Increase health check timeout:
+   ```bash
+   HEALTH_CHECK_TIMEOUT=10000  # 10 seconds
+   ```
+
+2. Adjust failure threshold (requires code change)
+
+3. Review `slot-check` action command - it may be too strict
+
+4. Check network latency between Switcher and devices
+
+## Security considerations
+
+- Health checks use same authentication as other device actions
+- API key required for inter-service communication
+- Slot switching requires appropriate permissions
+- All changes are logged and auditable
+- Failed authentication attempts are logged
+
+## Performance impact
+
+- Health checks run every 30 seconds by default
+- Minimal network overhead (simple ping-like tests)
+- Failover typically completes within 1-2 check cycles (~30-60 seconds)
+- No impact on streaming performance during normal operation
+- Database updates only occur when slots actually change
+
+<Tip>
+  For mission-critical deployments, consider running Switcher service in high-availability mode with redundant instances.
+</Tip>

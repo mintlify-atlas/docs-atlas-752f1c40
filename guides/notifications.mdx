@@ -1,0 +1,567 @@
+---
+title: Notifications
+description: Real-time notifications using WebSocket connections in Joystick
+---
+
+Joystick provides a real-time notification system using WebSocket connections, allowing clients to receive instant updates about device events, slot changes, and system status.
+
+## Overview
+
+The notification system consists of:
+
+- **WebSocket server**: Maintains persistent connections to clients
+- **Notification service**: Broadcasts messages to connected clients
+- **PocketBase integration**: Persists notifications to database
+- **Event types**: Categorized notifications (info, success, warning, error)
+
+## WebSocket connection
+
+Connect to the notification WebSocket endpoint:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/notifications');
+
+ws.onopen = () => {
+  console.log('Connected to notification service');
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log('Notification received:', message);
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+  console.log('Disconnected from notification service');
+};
+```
+
+### Connection lifecycle
+
+<Steps>
+  <Step title="Establish connection">
+    Client initiates WebSocket connection to the Joystick service notification endpoint.
+  </Step>
+
+  <Step title="Client registration">
+    Upon successful connection, the client is added to the notification broadcast list.
+  </Step>
+
+  <Step title="Receive notifications">
+    Client receives real-time notifications as JSON messages through the WebSocket.
+  </Step>
+
+  <Step title="Connection cleanup">
+    When the client disconnects, it is automatically removed from the broadcast list.
+  </Step>
+</Steps>
+
+<Tip>
+  The notification system automatically handles client cleanup. When a WebSocket connection closes or errors, the client is removed from the broadcast list.
+</Tip>
+
+## Message format
+
+Notification messages follow a consistent JSON structure:
+
+```typescript
+interface WebSocketNotificationMessage {
+  type: "notification";
+  payload: NotificationPayload;
+}
+
+interface NotificationPayload {
+  id: string;                    // Unique notification ID
+  type: "info" | "success" | "warning" | "error";
+  title: string;                 // Notification title
+  message: string;               // Notification message
+  timestamp: number;             // Unix timestamp
+  userId: string;                // User ID or "system"
+  deviceId?: string;             // Optional device ID
+  dismissible: boolean;          // Whether user can dismiss
+}
+```
+
+### Example notification
+
+```json
+{
+  "type": "notification",
+  "payload": {
+    "id": "abc123def456",
+    "type": "warning",
+    "title": "Slot Switch",
+    "message": "Device camera-01 switched to secondary slot due to connection failure",
+    "timestamp": 1709377800000,
+    "userId": "user789",
+    "deviceId": "device123",
+    "dismissible": true
+  }
+}
+```
+
+## Notification types
+
+Notifications are categorized by type:
+
+### Info notifications
+
+General information and status updates:
+
+```javascript
+{
+  type: "info",
+  title: "Stream Started",
+  message: "Camera-01 stream is now active"
+}
+```
+
+### Success notifications
+
+Successful operations:
+
+```javascript
+{
+  type: "success",
+  title: "Configuration Saved",
+  message: "Device settings updated successfully"
+}
+```
+
+### Warning notifications
+
+Non-critical issues requiring attention:
+
+```javascript
+{
+  type: "warning",
+  title: "High Temperature",
+  message: "Device temperature is 75°C, approaching threshold"
+}
+```
+
+### Error notifications
+
+Critical errors and failures:
+
+```javascript
+{
+  type: "error",
+  title: "Connection Failed",
+  message: "Unable to reach device at 192.168.1.100"
+}
+```
+
+## Sending notifications
+
+Notifications can be sent programmatically from the backend:
+
+```typescript
+import { sendNotification } from "@/notifications";
+
+// Send a simple notification
+await sendNotification({
+  type: "info",
+  title: "Task Complete",
+  message: "Media processing finished",
+  deviceId: "device123",
+  dismissible: true
+});
+
+// Send with user context
+await sendNotification(
+  {
+    type: "success",
+    title: "Action Executed",
+    message: "Reboot command sent successfully",
+    deviceId: "device123"
+  },
+  userId,
+  userName
+);
+```
+
+### Send notification API response
+
+```typescript
+interface SendNotificationResponse {
+  success: boolean;
+  notificationId?: string;    // Database record ID
+  clientsNotified?: number;   // Number of WebSocket clients notified
+  error?: string;
+}
+```
+
+## Client implementation
+
+### React/TypeScript example
+
+```typescript
+import { useEffect, useState } from 'react';
+
+interface Notification {
+  id: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  title: string;
+  message: string;
+  timestamp: number;
+}
+
+export function useNotifications() {
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    const ws = new WebSocket('ws://localhost:8000/ws/notifications');
+
+    ws.onopen = () => {
+      console.log('Notification service connected');
+      setIsConnected(true);
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'notification') {
+        setNotifications(prev => [...prev, message.payload]);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setIsConnected(false);
+    };
+
+    ws.onclose = () => {
+      console.log('Notification service disconnected');
+      setIsConnected(false);
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
+
+  return {
+    notifications,
+    isConnected,
+    dismissNotification
+  };
+}
+```
+
+### Vue.js example
+
+```typescript
+import { ref, onMounted, onUnmounted } from 'vue';
+
+export function useNotifications() {
+  const notifications = ref([]);
+  const isConnected = ref(false);
+  let ws: WebSocket | null = null;
+
+  const connect = () => {
+    ws = new WebSocket('ws://localhost:8000/ws/notifications');
+
+    ws.onopen = () => {
+      isConnected.value = true;
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'notification') {
+        notifications.value.push(message.payload);
+      }
+    };
+
+    ws.onclose = () => {
+      isConnected.value = false;
+      // Attempt to reconnect after 5 seconds
+      setTimeout(connect, 5000);
+    };
+  };
+
+  onMounted(() => {
+    connect();
+  });
+
+  onUnmounted(() => {
+    ws?.close();
+  });
+
+  return {
+    notifications,
+    isConnected
+  };
+}
+```
+
+### Vanilla JavaScript example
+
+```javascript
+class NotificationClient {
+  constructor(url) {
+    this.url = url;
+    this.ws = null;
+    this.notifications = [];
+    this.listeners = [];
+  }
+
+  connect() {
+    this.ws = new WebSocket(this.url);
+
+    this.ws.onopen = () => {
+      console.log('Connected to notifications');
+    };
+
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'notification') {
+        this.notifications.push(message.payload);
+        this.notifyListeners(message.payload);
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    this.ws.onclose = () => {
+      console.log('Connection closed, reconnecting...');
+      setTimeout(() => this.connect(), 5000);
+    };
+  }
+
+  onNotification(callback) {
+    this.listeners.push(callback);
+  }
+
+  notifyListeners(notification) {
+    this.listeners.forEach(listener => listener(notification));
+  }
+
+  disconnect() {
+    this.ws?.close();
+  }
+}
+
+// Usage
+const client = new NotificationClient('ws://localhost:8000/ws/notifications');
+client.connect();
+
+client.onNotification((notification) => {
+  console.log('New notification:', notification);
+  // Update UI
+  displayNotification(notification);
+});
+```
+
+## Database persistence
+
+Notifications are persisted to the PocketBase `notifications` collection:
+
+```typescript
+interface NotificationRecord {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  seen: string[];        // Array of user IDs who have seen it
+  device?: string;       // Optional device relation
+  user?: string;         // Optional user relation
+  created: string;
+  updated: string;
+}
+```
+
+### Query historical notifications
+
+```bash
+# Get all notifications
+curl "http://localhost:8090/api/collections/notifications/records"
+
+# Get unseen notifications for a user
+curl "http://localhost:8090/api/collections/notifications/records?filter=seen!~'USER_ID'"
+
+# Get notifications for a device
+curl "http://localhost:8090/api/collections/notifications/records?filter=device='DEVICE_ID'"
+
+# Mark notification as seen
+curl -X PATCH "http://localhost:8090/api/collections/notifications/records/NOTIFICATION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"seen+": "USER_ID"}'
+```
+
+## System notifications
+
+The platform automatically sends notifications for:
+
+### Slot switching events
+
+When a device switches between primary and secondary slots:
+
+```json
+{
+  "type": "warning",
+  "title": "Slot Switch",
+  "message": "Device switched to secondary slot",
+  "deviceId": "device123"
+}
+```
+
+### Device status changes
+
+When device status changes (on/off/waiting/error):
+
+```json
+{
+  "type": "info",
+  "title": "Status Update",
+  "message": "Device is now online",
+  "deviceId": "device123"
+}
+```
+
+### Configuration updates
+
+When device configuration is modified:
+
+```json
+{
+  "type": "success",
+  "title": "Configuration Updated",
+  "message": "Device settings saved successfully",
+  "deviceId": "device123"
+}
+```
+
+### Media events
+
+When new media is available from Studio service:
+
+```json
+{
+  "type": "info",
+  "title": "New Media",
+  "message": "Capture event processed",
+  "deviceId": "device123"
+}
+```
+
+## Monitoring
+
+### Check connected clients
+
+```typescript
+import { getNotificationClientsCount } from '@/notifications';
+
+const count = getNotificationClientsCount();
+console.log(`${count} clients connected`);
+```
+
+### Track notification delivery
+
+Monitor notification service logs:
+
+```bash
+docker logs -f joystick | grep "notification"
+```
+
+Log entries include:
+- Client connections/disconnections
+- Notification broadcasts
+- Delivery failures
+- Client count updates
+
+## Troubleshooting
+
+### WebSocket connection fails
+
+1. Verify Joystick service is running:
+   ```bash
+   curl http://localhost:8000/api/health
+   ```
+
+2. Check firewall allows WebSocket connections
+
+3. Verify the WebSocket URL is correct (ws:// not http://)
+
+4. Check browser console for CORS issues
+
+<Warning>
+  When using HTTPS, you must use WSS (secure WebSocket) instead of WS. Mixing protocols will fail due to browser security policies.
+</Warning>
+
+### Notifications not received
+
+1. Verify WebSocket connection is open:
+   ```javascript
+   console.log(ws.readyState); // Should be 1 (OPEN)
+   ```
+
+2. Check that notifications are being sent:
+   ```bash
+   docker logs joystick | grep "broadcastNotification"
+   ```
+
+3. Verify client is properly handling messages:
+   ```javascript
+   ws.onmessage = (event) => {
+     console.log('Raw message:', event.data);
+   };
+   ```
+
+### Connection drops frequently
+
+1. Implement ping/pong to keep connection alive:
+   ```javascript
+   setInterval(() => {
+     if (ws.readyState === WebSocket.OPEN) {
+       ws.send(JSON.stringify({ type: 'ping' }));
+     }
+   }, 30000); // Every 30 seconds
+   ```
+
+2. Implement automatic reconnection (see examples above)
+
+3. Check network stability and proxy configurations
+
+4. Review server logs for errors or resource issues
+
+### High memory usage
+
+1. Limit notification history in client:
+   ```javascript
+   const MAX_NOTIFICATIONS = 100;
+   if (notifications.length > MAX_NOTIFICATIONS) {
+     notifications = notifications.slice(-MAX_NOTIFICATIONS);
+   }
+   ```
+
+2. Clean up old dismissed notifications
+
+3. Implement pagination for historical notifications from database
+
+## Best practices
+
+<Tip>
+  **Reconnection strategy**: Always implement automatic reconnection with exponential backoff to handle temporary network issues.
+</Tip>
+
+<Tip>
+  **Message validation**: Validate notification messages before processing to handle malformed data gracefully.
+</Tip>
+
+<Tip>
+  **Rate limiting**: Consider implementing client-side rate limiting for notification displays to prevent UI flooding.
+</Tip>
+
+<Tip>
+  **Persistence**: Use the database to retrieve missed notifications when clients reconnect after being offline.
+</Tip>

@@ -1,0 +1,99 @@
+---
+title: Welcome to Joystick IoT
+description: A powerful IoT platform for remote device control, real-time streaming, and comprehensive device management
+---
+
+# Welcome to Joystick IoT
+
+Joystick is a comprehensive IoT platform designed for remote device control, real-time video streaming, and advanced device management. Built on a modern microservices architecture, it provides reliable connectivity, automatic failover, and a rich web interface for managing your connected devices.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with Joystick in minutes using Docker Compose
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand the microservices architecture powering Joystick
+  </Card>
+  <Card title="Authentication" icon="shield-halved" href="/api/authentication">
+    Learn about JWT tokens, API keys, and permission systems
+  </Card>
+  <Card title="Device Control" icon="gamepad" href="/api/device-control">
+    Execute actions, monitor sensors, and manage device connections
+  </Card>
+</CardGroup>
+
+## Key features
+
+<CardGroup cols={3}>
+  <Card title="Remote device control" icon="satellite-dish">
+    Execute custom actions on connected devices with real-time feedback and comprehensive logging
+  </Card>
+  <Card title="Live video streaming" icon="video">
+    Stream video from devices using MediaMTX with automatic URL management and failover support
+  </Card>
+  <Card title="Dual connection slots" icon="arrows-rotate">
+    Automatic failover between primary and secondary connections ensures 24/7 uptime
+  </Card>
+  <Card title="Sensor monitoring" icon="gauge">
+    Track GPS, IMU, battery, and cellular signal data in real-time with historical analytics
+  </Card>
+  <Card title="Permission system" icon="lock">
+    Fine-grained access control with feature-based permissions and device-level authorization
+  </Card>
+  <Card title="Real-time notifications" icon="bell">
+    Stay informed with push notifications for device events, health checks, and system alerts
+  </Card>
+</CardGroup>
+
+## Platform components
+
+Joystick is built using a modern microservices architecture:
+
+- **App**: React-based web interface with real-time updates
+- **Joystick API**: Core device control and action execution engine
+- **PocketBase**: Authentication, database, and real-time subscriptions
+- **MediaMTX**: RTSP/WebRTC video streaming server
+- **Switcher**: Automatic slot switching and health monitoring
+- **Panel**: Device status dashboard and monitoring interface
+- **Baker**: Stream management and video processing
+- **Studio**: Advanced video compositing and layouts
+- **Whisper**: Audio processing and communication service
+
+<Note>
+  All services are containerized and orchestrated with Docker Compose for easy deployment and scaling.
+</Note>
+
+## What you can build
+
+Joystick is ideal for:
+
+- **Remote robotics control**: Operate robots and autonomous vehicles from anywhere
+- **IoT device management**: Monitor and control large fleets of connected devices
+- **Surveillance systems**: Stream and record video from multiple cameras
+- **Telemetry platforms**: Collect and analyze sensor data in real-time
+- **Emergency response**: Deploy reliable communication systems with automatic failover
+
+## Technology stack
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="browser">
+    React 19, TypeScript, Vite, TanStack Query, Zustand, Tailwind CSS
+  </Card>
+  <Card title="Backend" icon="server">
+    Bun runtime, Elysia framework, PocketBase, MediaMTX
+  </Card>
+  <Card title="Infrastructure" icon="docker">
+    Docker Compose, Traefik reverse proxy, Linux/amd64 containers
+  </Card>
+  <Card title="Real-time" icon="bolt">
+    WebSocket subscriptions, live video streaming, push notifications
+  </Card>
+</CardGroup>
+
+## Getting started
+
+Ready to dive in? Start with our [quickstart guide](/quickstart) to deploy Joystick locally in minutes.
+
+<Info>
+  Joystick requires Docker and Docker Compose. Make sure you have them installed before proceeding.
+</Info>

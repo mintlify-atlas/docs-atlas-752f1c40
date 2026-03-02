@@ -1,0 +1,500 @@
+---
+title: Pocketbase service
+description: Database and authentication backend
+---
+
+PocketBase is the central database and authentication backend for the Joystick IoT platform, providing data storage, user management, and real-time synchronization.
+
+## Overview
+
+PocketBase serves as the single source of truth for all platform data, including devices, users, actions, media events, and system configuration. It provides a REST API, real-time subscriptions, and built-in authentication.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+pocketbase:
+  image: ghcr.io/skylineagle/joystick/pb:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  ports:
+    - "8090:8090"
+  environment:
+    - BAKER_URL=http://baker:3000
+    - MEDIAMTX_API=http://host.docker.internal:9997
+    - JOYSTICK_API_URL=http://joystick:8000
+    - JOYSTICK_API_KEY=dev-api-key-12345
+  volumes:
+    - pb_data:/pb_data
+    - ./pocketbase/pb_migrations:/pb_migrations
+  healthcheck:
+    test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+    interval: 5s
+    timeout: 5s
+    retries: 5
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `BAKER_URL` | Baker service URL | Required |
+| `MEDIAMTX_API` | MediaMTX API endpoint | Required |
+| `JOYSTICK_API_URL` | Joystick service URL | Required |
+| `JOYSTICK_API_KEY` | API key for Joystick | Required |
+
+### Volumes
+
+- `pb_data:/pb_data` - Persistent database storage
+- `./pocketbase/pb_migrations:/pb_migrations` - Database migration files
+
+## Collections
+
+PocketBase manages several core collections:
+
+### devices
+
+Stores device information and configuration:
+
+```javascript
+{
+  id: "device123",
+  name: "Camera 1",
+  mode: "live", // live, off, auto
+  information: {
+    host: "192.168.1.100",
+    phone: "10.0.0.1",
+    secondSlotHost: "192.168.1.101",
+    secondSlotPhone: "10.0.0.2",
+    autoSlotSwitch: true,
+    activeSlot: "primary"
+  },
+  configuration: {
+    name: "camera1",
+    // MediaMTX configuration
+  },
+  device: "device_model_id"
+}
+```
+
+### actions
+
+Defines available device actions:
+
+```javascript
+{
+  id: "action123",
+  name: "reboot",
+  description: "Reboot the device",
+  category: "system"
+}
+```
+
+### run
+
+Maps actions to devices with commands:
+
+```javascript
+{
+  id: "run123",
+  device: "device_model_id",
+  action: "action123",
+  command: "reboot",
+  parameters: {
+    // JSON schema for parameters
+  },
+  target: "device" // or "local"
+}
+```
+
+### gallery
+
+Stores media events:
+
+```javascript
+{
+  id: "event123",
+  device: "device123",
+  name: "capture.jpg",
+  media_type: "image",
+  has_thumbnail: true,
+  event: "file_id",
+  thumbnail: "thumb_id",
+  metadata: {},
+  created: "2024-03-20T10:00:00Z"
+}
+```
+
+### users
+
+User accounts and authentication:
+
+```javascript
+{
+  id: "user123",
+  email: "user@example.com",
+  name: "John Doe",
+  role: "admin", // admin, operator, viewer
+  verified: true
+}
+```
+
+### schedules
+
+Scheduled actions managed by Baker:
+
+```javascript
+{
+  id: "schedule123",
+  device: "device123",
+  action: "action123",
+  cron: "0 3 * * *",
+  enabled: true,
+  parameters: {}
+}
+```
+
+## Authentication
+
+PocketBase provides built-in authentication:
+
+### User authentication
+
+```javascript
+// Login
+const authData = await pb.collection('users').authWithPassword(
+  'user@example.com',
+  'password'
+);
+
+// Get current user
+const user = pb.authStore.model;
+
+// Logout
+pb.authStore.clear();
+```
+
+### Admin authentication
+
+```javascript
+// Admin login
+const adminAuth = await pb.admins.authWithPassword(
+  'admin@example.com',
+  'password'
+);
+```
+
+### API token authentication
+
+Services use API tokens for authentication:
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://localhost:8090/api/collections/devices/records
+```
+
+## Real-time subscriptions
+
+Subscribe to collection changes:
+
+```javascript
+// Subscribe to all device changes
+pb.collection('devices').subscribe('*', (e) => {
+  console.log('Event:', e.action); // create, update, delete
+  console.log('Record:', e.record);
+});
+
+// Subscribe to specific device
+pb.collection('devices').subscribe('device123', (e) => {
+  console.log('Device updated:', e.record);
+});
+
+// Unsubscribe
+pb.collection('devices').unsubscribe();
+```
+
+## Hooks and automation
+
+PocketBase supports server-side hooks for automation:
+
+### Device hooks
+
+Automatically update MediaMTX when device changes:
+
+```javascript
+// devices.pb.js
+onRecordAfterUpdateRequest((e) => {
+  const device = e.record;
+  
+  // Update stream URLs when activeSlot changes
+  if (device.information.activeSlot !== oldSlot) {
+    updateStreamConfiguration(device);
+    sendNotification('Slot switched to ' + device.information.activeSlot);
+  }
+}, 'devices');
+```
+
+### Schedule hooks
+
+Sync schedules with Baker:
+
+```javascript
+// schedules.pb.js
+onRecordAfterCreateRequest((e) => {
+  fetch(`${process.env.BAKER_URL}/api/schedules/sync`, {
+    method: 'POST'
+  });
+}, 'schedules');
+```
+
+## REST API
+
+PocketBase exposes a full REST API:
+
+### List records
+
+```http
+GET /api/collections/devices/records
+```
+
+**Query parameters:**
+- `page` - Page number
+- `perPage` - Records per page
+- `filter` - Filter expression
+- `sort` - Sort field(s)
+- `expand` - Relations to expand
+
+### Get record
+
+```http
+GET /api/collections/devices/records/:id
+```
+
+### Create record
+
+```http
+POST /api/collections/devices/records
+```
+
+**Request body:**
+```json
+{
+  "name": "Camera 1",
+  "mode": "live",
+  "information": {}
+}
+```
+
+### Update record
+
+```http
+PATCH /api/collections/devices/records/:id
+```
+
+### Delete record
+
+```http
+DELETE /api/collections/devices/records/:id
+```
+
+## Filtering and sorting
+
+Powerful filtering syntax:
+
+```javascript
+// Filter by field value
+filter: 'mode = "live"'
+
+// Multiple conditions
+filter: 'mode = "live" && information.autoSlotSwitch = true'
+
+// Text search
+filter: 'name ~ "Camera"'
+
+// Relations
+filter: 'device.name = "Model X"'
+
+// Date filtering
+filter: 'created > "2024-03-01"'
+```
+
+Sorting:
+
+```javascript
+// Ascending
+sort: 'name'
+
+// Descending
+sort: '-created'
+
+// Multiple fields
+sort: 'name,-created'
+```
+
+## File storage
+
+PocketBase handles file uploads:
+
+```javascript
+// Upload file
+const formData = new FormData();
+formData.append('event', fileBlob);
+formData.append('name', 'capture.jpg');
+
+await pb.collection('gallery').create(formData);
+
+// Get file URL
+const fileUrl = pb.getFileUrl(record, 'event');
+```
+
+## Migrations
+
+Database schema managed via migrations:
+
+```javascript
+// pb_migrations/1234567890_create_devices.js
+migrate((db) => {
+  const collection = new Collection({
+    name: 'devices',
+    type: 'base',
+    schema: [
+      {
+        name: 'name',
+        type: 'text',
+        required: true
+      },
+      {
+        name: 'mode',
+        type: 'select',
+        options: ['live', 'off', 'auto']
+      }
+    ]
+  });
+  
+  return db.saveCollection(collection);
+});
+```
+
+## Admin UI
+
+PocketBase provides an admin UI at:
+
+```
+http://localhost:8090/_/
+```
+
+Features:
+
+- Collection management
+- Record browsing and editing
+- User management
+- API rules configuration
+- Logs and monitoring
+
+## Health check
+
+```http
+GET /api/health
+```
+
+Returns health status for Docker healthcheck:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+## Backup and restore
+
+Backup PocketBase data:
+
+```bash
+# Backup
+docker cp joystick-pocketbase-1:/pb_data ./pb_data_backup
+
+# Restore
+docker cp ./pb_data_backup joystick-pocketbase-1:/pb_data
+```
+
+## Security
+
+### API rules
+
+Collection-level access control:
+
+```javascript
+// Only authenticated users can read
+listRule: '@request.auth.id != ""'
+
+// Only admins can create
+createRule: '@request.auth.role = "admin"'
+
+// Users can only update their own records
+updateRule: '@request.auth.id = id'
+```
+
+### CORS
+
+CORS configured for cross-origin requests:
+
+```javascript
+allowedOrigins: ['*']
+```
+
+## Performance optimization
+
+### Indexes
+
+Add indexes for frequently queried fields:
+
+```javascript
+{
+  name: 'idx_device_mode',
+  fields: ['mode']
+}
+```
+
+### Caching
+
+Enable query result caching:
+
+```javascript
+const devices = await pb.collection('devices')
+  .getList(1, 50, { cache: 'force-cache' });
+```
+
+## Integration with services
+
+All services integrate with PocketBase:
+
+- **Joystick** - Reads devices, actions, and run configurations
+- **Studio** - Stores media events in gallery collection
+- **Switcher** - Updates device mode and activeSlot
+- **Baker** - Reads schedules collection
+- **Whisper** - Reads device phone numbers
+- **Panel** - Full CRUD operations on all collections
+
+## Troubleshooting
+
+### Connection errors
+
+- Verify `POCKETBASE_URL` is correct in services
+- Check PocketBase is healthy
+- Review network connectivity
+
+### Authentication failures
+
+- Verify user credentials
+- Check token expiration
+- Review API rules
+
+### Performance issues
+
+- Add indexes on queried fields
+- Reduce page size in queries
+- Use filtering to limit results
+- Enable caching where appropriate

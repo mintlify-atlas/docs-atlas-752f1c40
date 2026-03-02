@@ -1,0 +1,147 @@
+---
+title: Studio API overview
+description: Media management and event processing service for IoT devices
+---
+
+The Studio service provides flexible media management capabilities for IoT devices, supporting any file type with optional thumbnails, configurable device actions, and multiple event publishing methods.
+
+## Features
+
+### Flexible media support
+
+- **Any file type** - Support for images, videos, audio, documents, and other media
+- **Optional thumbnails** - Works with devices that don't generate thumbnails
+- **Media type detection** - Automatic classification based on file extensions
+- **File size tracking** - Monitors file sizes and metadata
+
+### Dynamic device actions
+
+- **Configurable actions** - Use any PocketBase-configured action
+- **Fallback actions** - Tries multiple action names (`list-events`, `list-files`, `list-media`)
+- **Parameter templating** - Support for dynamic parameters in action commands
+- **Flexible output parsing** - Handles various output formats from devices
+
+### Event publishing methods
+
+The Studio service supports multiple ways to publish media events:
+
+1. **File-based upload** - Simple directory-based file upload system
+2. **Harvesting** - Automatic polling of device events at configurable intervals
+3. **Direct upload** - HTTP POST endpoint for direct event upload with files
+4. **URL-based upload** - Get pre-signed URLs for secure file uploads
+
+### Hook system
+
+- **Event-based hooks** - Execute device actions on specific events
+- **Configurable triggers** - 7 different hook event types
+- **Parameter injection** - Automatic context parameter injection
+- **Device-specific or global** - Hooks can apply to specific devices or all devices
+
+## Directory structure
+
+The service creates the following directory structure for each device:
+
+```
+data/gallery/
+  ├── device1/
+  │   ├── incoming/     # Drop new files here
+  │   ├── processed/    # Successfully processed files
+  │   └── thumbnails/   # Optional thumbnail files
+  └── device2/
+      ├── incoming/
+      ├── processed/
+      └── thumbnails/
+```
+
+## API endpoints
+
+### Media management
+
+- `GET /api/gallery/:device/paths` - Get device-specific upload paths
+- `GET /api/gallery/:device/events` - List media events with type filtering
+- `POST /api/gallery/:device/start` - Start media service with flexible config
+- `POST /api/gallery/:device/stop` - Stop media service
+- `GET /api/gallery/:device/status` - Get service status
+- `POST /api/gallery/:device/pull/:eventId` - Pull specific event
+- `GET /api/gallery/:device/stats` - Get media statistics with type breakdown
+- `DELETE /api/gallery/:device/events/:eventId` - Delete media event
+
+### Event upload
+
+- `POST /api/gallery/:device/upload` - Direct event upload with files
+- `GET /api/gallery/:device/upload-url` - Get pre-signed upload URLs
+
+### Hook management
+
+- `GET /api/hooks` - List all hooks (optional device filter)
+- `POST /api/hooks` - Create new hook
+- `PATCH /api/hooks/:id` - Update hook
+- `DELETE /api/hooks/:id` - Delete hook
+- `GET /api/hooks/events/:eventType` - Get hooks by event type
+
+### File watcher management
+
+- `GET /api/watchers` - Get status of all file watchers
+- `POST /api/watchers/refresh` - Refresh all file watchers
+- `POST /api/watchers/sync` - Sync watchers with current device list
+- `POST /api/watchers/:deviceId/add` - Add watcher for specific device
+- `DELETE /api/watchers/:deviceId` - Remove watcher for specific device
+- `GET /api/watchers/:deviceId/status` - Check if watcher is active
+- `POST /api/watchers/cleanup-orphaned` - Clean up orphaned watchers
+
+## File-based upload workflow
+
+The simplest way to publish events:
+
+1. **Get device paths:**
+
+```bash
+curl "http://localhost:8001/api/gallery/device123/paths"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "paths": {
+    "incoming": "/path/to/data/gallery/device123/incoming",
+    "thumbnails": "/path/to/data/gallery/device123/thumbnails"
+  }
+}
+```
+
+2. **Upload files:**
+
+```bash
+# Copy event file
+cp event.jpg /path/to/data/gallery/device123/incoming/
+
+# Optional: Copy thumbnail (must have same name as event file)
+cp thumb.jpg /path/to/data/gallery/device123/thumbnails/event.jpg
+```
+
+3. **Automatic processing:**
+
+The service will:
+- Detect new files in the incoming directory
+- Create gallery records with metadata
+- Move processed files to the processed directory
+- Handle thumbnails if present
+- Trigger appropriate hooks
+
+## Authentication
+
+All Studio API endpoints require authentication using:
+
+- **Bearer token** - JWT token from PocketBase authentication
+- **API key** - Using `X-API-Key` header
+
+See the [Authentication](/api/authentication) documentation for details.
+
+## Base URL
+
+The Studio service runs on port 8001 by default:
+
+```
+http://localhost:8001
+```

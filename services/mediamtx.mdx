@@ -1,0 +1,437 @@
+---
+title: MediaMTX service
+description: Real-time streaming server for device video
+---
+
+MediaMTX is a real-time media server that handles video streaming from devices using protocols like RTSP, WebRTC, HLS, and SRT.
+
+## Overview
+
+MediaMTX provides the streaming infrastructure for the Joystick IoT platform, supporting multiple input and output protocols with low latency and high performance.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+mediamtx:
+  image: bluenviron/mediamtx:1.11.2
+  network_mode: host
+  platform: linux/amd64
+  restart: unless-stopped
+  volumes:
+    - ./mediamtx/mediamtx.yml:/mediamtx.yml
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+```
+
+### Network mode
+
+MediaMTX uses `host` network mode to access all network interfaces:
+
+- Direct access to device streams
+- Support for UDP protocols
+- Simplified port management
+- Lower network overhead
+
+## Configuration file
+
+MediaMTX is configured via `mediamtx.yml`:
+
+```yaml
+# API configuration
+api: true
+apiAddress: :9997
+
+# Path configuration
+paths:
+  all:
+    # Default path settings
+```
+
+## Supported protocols
+
+### Input protocols
+
+MediaMTX can receive streams via:
+
+- **RTSP** - Real-Time Streaming Protocol
+- **RTMP** - Real-Time Messaging Protocol
+- **WebRTC** - Web Real-Time Communication
+- **SRT** - Secure Reliable Transport
+- **UDP** - User Datagram Protocol
+- **MPEG-TS** - MPEG Transport Stream
+
+### Output protocols
+
+Clients can consume streams via:
+
+- **RTSP** - For VLC and other media players
+- **WebRTC** - For web browsers
+- **HLS** - HTTP Live Streaming for browsers
+- **Low-Latency HLS** - Reduced latency HLS
+
+## Stream paths
+
+Streams are organized by path:
+
+```
+rtsp://localhost:8554/device-name
+http://localhost:8888/device-name/
+ws://localhost:8889/device-name
+```
+
+### Dynamic path creation
+
+Switcher service creates paths via API:
+
+```http
+POST http://localhost:9997/v3/config/paths/add/device-name
+```
+
+**Request body:**
+```json
+{
+  "name": "device-name",
+  "source": "rtsp://192.168.1.100:8554/live",
+  "sourceProtocol": "rtsp",
+  "sourceOnDemand": false
+}
+```
+
+### Path deletion
+
+```http
+DELETE http://localhost:9997/v3/config/paths/delete/device-name
+```
+
+## API endpoints
+
+MediaMTX exposes a REST API on port 9997:
+
+### List paths
+
+```http
+GET /v3/config/paths/list
+```
+
+Get all configured stream paths.
+
+### Get path
+
+```http
+GET /v3/config/paths/get/:name
+```
+
+Get specific path configuration.
+
+### Add path
+
+```http
+POST /v3/config/paths/add/:name
+```
+
+Add new stream path.
+
+### Edit path
+
+```http
+POST /v3/config/paths/edit/:name
+```
+
+Update existing path.
+
+### Delete path
+
+```http
+DELETE /v3/config/paths/delete/:name
+```
+
+Remove stream path.
+
+## Port usage
+
+MediaMTX uses multiple ports:
+
+| Port | Protocol | Purpose |
+|------|----------|----------|
+| 8554 | RTSP | RTSP streaming |
+| 1935 | RTMP | RTMP streaming |
+| 8888 | HTTP | HLS streaming |
+| 8889 | WebSocket | WebRTC signaling |
+| 8189 | UDP | WebRTC data |
+| 9997 | HTTP | API server |
+
+## Streaming examples
+
+### RTSP client
+
+View stream in VLC:
+
+```bash
+vlc rtsp://localhost:8554/device-name
+```
+
+### WebRTC in browser
+
+```javascript
+const pc = new RTCPeerConnection();
+const ws = new WebSocket('ws://localhost:8889/device-name/whep');
+
+ws.onmessage = async (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.offer) {
+    await pc.setRemoteDescription(msg.offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ answer }));
+  }
+};
+
+pc.ontrack = (event) => {
+  videoElement.srcObject = event.streams[0];
+};
+```
+
+### HLS in browser
+
+```html
+<video id="video" controls></video>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+  const video = document.getElementById('video');
+  const hls = new Hls();
+  hls.loadSource('http://localhost:8888/device-name/index.m3u8');
+  hls.attachMedia(video);
+</script>
+```
+
+## Device configuration
+
+Devices stream to MediaMTX using various methods:
+
+### RTSP push
+
+Device pushes RTSP stream:
+
+```bash
+ffmpeg -i /dev/video0 -f rtsp rtsp://mediamtx:8554/device-name
+```
+
+### RTSP pull
+
+MediaMTX pulls from device:
+
+```yaml
+paths:
+  device-name:
+    source: rtsp://192.168.1.100:8554/live
+```
+
+### WebRTC
+
+Device streams via WebRTC:
+
+```javascript
+const pc = new RTCPeerConnection();
+const ws = new WebSocket('ws://mediamtx:8889/device-name/whip');
+// ... WebRTC setup
+```
+
+## Performance tuning
+
+### Buffer settings
+
+Adjust buffer sizes for latency vs stability:
+
+```yaml
+readBufferCount: 512
+readTimeout: 10s
+writeTimeout: 10s
+```
+
+### Protocol selection
+
+Choose protocol based on requirements:
+
+- **WebRTC** - Lowest latency (< 1s)
+- **Low-Latency HLS** - Low latency (2-4s), wide compatibility
+- **HLS** - Higher latency (6-10s), maximum compatibility
+- **RTSP** - Low latency, requires player
+
+### Resource limits
+
+```yaml
+maxConnections: 100
+maxPathCount: 100
+```
+
+## Monitoring
+
+### Logs
+
+MediaMTX provides detailed logs:
+
+```bash
+docker logs -f joystick-mediamtx-1
+```
+
+### Metrics
+
+API provides metrics:
+
+```http
+GET /v3/metrics
+```
+
+## Integration with Switcher
+
+Switcher manages MediaMTX paths:
+
+1. Device mode set to "live"
+2. Switcher calls MediaMTX API to add path
+3. Path configured with device stream source
+4. Clients can access stream
+
+### Slot switching
+
+When slot switches:
+
+1. PocketBase updates device `activeSlot`
+2. Hook detects change
+3. Stream source updated to new slot host
+4. MediaMTX reconnects to new source
+
+## Troubleshooting
+
+### Stream not available
+
+- Verify path exists in MediaMTX
+- Check device is streaming to correct URL
+- Test device stream directly
+- Review MediaMTX logs
+
+### High latency
+
+- Use WebRTC or Low-Latency HLS
+- Reduce buffer sizes
+- Check network bandwidth
+- Optimize device encoding settings
+
+### Connection errors
+
+- Verify network connectivity
+- Check firewall rules
+- Ensure ports are not blocked
+- Test with different protocol
+
+### Performance issues
+
+- Reduce concurrent streams
+- Lower resolution/bitrate
+- Increase resource limits
+- Use hardware encoding on device
+
+## Security considerations
+
+### Authentication
+
+Enable authentication for streams:
+
+```yaml
+paths:
+  device-name:
+    readUser: user
+    readPass: password
+```
+
+### Encryption
+
+Use encrypted protocols:
+
+- RTSPS (RTSP over TLS)
+- RTMPS (RTMP over TLS)
+- WebRTC (built-in encryption)
+
+### Network isolation
+
+Restrict access via firewall:
+
+```bash
+# Allow only from specific IP
+iptables -A INPUT -p tcp --dport 8554 -s 192.168.1.0/24 -j ACCEPT
+iptables -A INPUT -p tcp --dport 8554 -j DROP
+```
+
+## Advanced features
+
+### Recording
+
+Record streams to disk:
+
+```yaml
+paths:
+  device-name:
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
+```
+
+### Multiple sources
+
+Failover between sources:
+
+```yaml
+paths:
+  device-name:
+    source: rtsp://primary:8554/live
+    fallback:
+      - rtsp://secondary:8554/live
+```
+
+### Transcoding
+
+Transcode streams (requires FFmpeg):
+
+```yaml
+paths:
+  device-name:
+    runOnReady: ffmpeg -i rtsp://localhost:8554/source -c:v libx264 -f rtsp rtsp://localhost:8554/transcoded
+```
+
+## Best practices
+
+### Use appropriate protocol
+
+Match protocol to use case:
+
+- Live monitoring: WebRTC
+- Recording: RTSP
+- Web playback: HLS
+- Low bandwidth: SRT
+
+### Monitor resources
+
+Track CPU, memory, and bandwidth:
+
+```bash
+docker stats joystick-mediamtx-1
+```
+
+### Plan for scale
+
+Consider stream count and quality:
+
+- 1080p: ~4-8 Mbps per stream
+- 720p: ~2-4 Mbps per stream
+- 480p: ~1-2 Mbps per stream
+
+### Test failover
+
+Regularly test slot switching:
+
+```bash
+curl -X POST http://localhost:8080/api/slot/device123/secondary
+```

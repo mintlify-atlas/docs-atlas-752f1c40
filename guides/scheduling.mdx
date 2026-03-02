@@ -1,0 +1,505 @@
+---
+title: Scheduling
+description: Automate device operations with the Baker scheduling service
+---
+
+The Baker service provides automated scheduling capabilities for device operations, allowing you to control when devices stream, record, or change modes based on time or duration.
+
+## Overview
+
+Baker uses the `cronbake` library to manage scheduled tasks for devices. It supports:
+
+- **Time-of-day automation**: Schedule operations at specific times
+- **Duration-based automation**: Cycle devices on/off at regular intervals
+- **Automatic status monitoring**: Update device status every 5 seconds
+- **Cron-based scheduling**: Flexible scheduling using cron expressions
+
+## Automation types
+
+### Time-of-day automation
+
+Schedule devices to turn on and off at specific times each day.
+
+```json
+{
+  "automationType": "timeOfDay",
+  "on": {
+    "utcDate": "08:00",
+    "mode": "recording"
+  },
+  "off": {
+    "utcDate": "18:00",
+    "mode": "off"
+  }
+}
+```
+
+This configuration:
+- Turns device on at 08:00 UTC in recording mode
+- Turns device off at 18:00 UTC
+- Repeats daily
+
+<Warning>
+  Times are specified in UTC. Make sure to convert from your local timezone to avoid scheduling at incorrect times.
+</Warning>
+
+### Duration-based automation
+
+Cycle devices on and off at regular intervals.
+
+```json
+{
+  "automationType": "duration",
+  "on": {
+    "minutes": 30,
+    "mode": "live"
+  },
+  "off": {
+    "minutes": 10,
+    "mode": "off"
+  }
+}
+```
+
+This configuration:
+- Turns device on for 30 minutes in live mode
+- Turns device off for 10 minutes
+- Repeats every 40 minutes (30 + 10)
+
+<Tip>
+  Duration-based automation is useful for battery-powered devices or when you need to limit bandwidth usage during peak hours.
+</Tip>
+
+## Creating automation schedules
+
+<Steps>
+  <Step title="Define automation configuration">
+    Create a device automation object with your desired schedule:
+    ```json
+    {
+      "automationType": "timeOfDay",
+      "on": {
+        "utcDate": "06:00",
+        "mode": "recording"
+      },
+      "off": {
+        "utcDate": "22:00",
+        "mode": "off"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Create the schedule">
+    Send the automation configuration to Baker:
+    ```bash
+    curl -X POST "http://localhost:3000/jobs/device123" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "automationType": "timeOfDay",
+        "on": {"utcDate": "06:00", "mode": "recording"},
+        "off": {"utcDate": "22:00", "mode": "off"}
+      }'
+    ```
+  </Step>
+
+  <Step title="Start the schedule">
+    Activate the automation:
+    ```bash
+    curl -X POST "http://localhost:3000/jobs/device123/start"
+    ```
+  </Step>
+
+  <Step title="Verify schedule status">
+    Check the schedule is running:
+    ```bash
+    curl "http://localhost:3000/jobs/device123"
+    ```
+  </Step>
+</Steps>
+
+## Device modes
+
+When scheduling automation, you can specify different modes:
+
+- **recording**: Device streams and records to disk
+- **live**: Device streams without recording
+- **off**: Device stops streaming completely
+
+The mode is passed to the device's toggle mode function, which updates the MediaMTX configuration accordingly.
+
+## Managing schedules
+
+### Check schedule status
+
+Get the current status of a device schedule:
+
+```bash
+curl "http://localhost:3000/jobs/device123"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "status": {
+    "running": true,
+    "name": "device123_on",
+    "lastExecution": "2026-03-02T06:00:00Z",
+    "nextExecution": "2026-03-02T22:00:00Z"
+  }
+}
+```
+
+### Get next execution time
+
+Find out when the next scheduled action will occur:
+
+```bash
+curl "http://localhost:3000/jobs/device123/next"
+```
+
+Response:
+```json
+{
+  "success": true,
+  "nextExecution": "2026-03-02T22:00:00Z",
+  "jobName": "device123_off",
+  "status": {
+    "running": true
+  }
+}
+```
+
+### Stop a schedule
+
+Temporarily stop automation without deleting it:
+
+```bash
+curl -X POST "http://localhost:3000/jobs/device123/stop"
+```
+
+The schedule configuration is preserved and can be restarted later.
+
+### Delete a schedule
+
+Permanently remove a device schedule:
+
+```bash
+curl -X DELETE "http://localhost:3000/jobs/device123"
+```
+
+<Warning>
+  Deleting a schedule is permanent. You will need to recreate the automation configuration if you want to schedule this device again.
+</Warning>
+
+## Automatic status monitoring
+
+Baker automatically monitors device status independently of schedules:
+
+```typescript
+// Built-in status monitoring job
+baker.add({
+  name: "live-status",
+  cron: "@every_5_seconds",
+  start: true,
+  callback: async () => {
+    await updateStatus();
+  }
+});
+```
+
+Every 5 seconds, Baker:
+1. Queries all devices from PocketBase
+2. Checks MediaMTX for stream status
+3. Updates device status field: `on`, `off`, or `waiting`
+4. Only updates database if status changed
+
+This ensures device status is always current in the UI.
+
+## Schedule initialization
+
+When Baker starts, it automatically initializes schedules for all devices:
+
+<Steps>
+  <Step title="Service startup">
+    Baker service starts and connects to PocketBase.
+  </Step>
+
+  <Step title="Device discovery">
+    Queries all devices from the database:
+    ```typescript
+    const devices = await pb.collection("devices").getFullList();
+    ```
+  </Step>
+
+  <Step title="Schedule creation">
+    For each device with an `automation` field:
+    - Creates on/off jobs based on automation type
+    - Configures cron schedules
+    - Registers callbacks
+  </Step>
+
+  <Step title="Auto-start">
+    Jobs are created but not started automatically. Use the start endpoint to activate them.
+  </Step>
+</Steps>
+
+<Tip>
+  Baker preserves schedules across restarts. When the service restarts, it automatically recreates all schedules from the database.
+</Tip>
+
+## Advanced scheduling
+
+### Custom cron expressions
+
+Baker uses `cronbake` which supports special cron formats:
+
+**At specific time**:
+```typescript
+cron: "@at_14:30"  // Runs at 14:30 every day
+```
+
+**Every N seconds**:
+```typescript
+cron: "@every_30_seconds"  // Runs every 30 seconds
+```
+
+**Standard cron**:
+```typescript
+cron: "0 */6 * * *"  // Runs every 6 hours
+```
+
+### Multiple schedules per device
+
+Each automation creates two jobs:
+- `{deviceId}_on`: Handles turning device on
+- `{deviceId}_off`: Handles turning device off
+
+This allows independent scheduling and status tracking.
+
+### Validation
+
+Baker validates automation configurations:
+
+```typescript
+// Time validation for timeOfDay
+if (
+  onHour < 0 || onHour > 23 ||
+  onMinute < 0 || onMinute > 59
+) {
+  throw new Error("Invalid time of day automation");
+}
+
+// Duration validation
+if (
+  automation?.off?.minutes === 0 ||
+  automation?.on?.minutes === 0
+) {
+  throw new Error("Invalid automation values");
+}
+```
+
+## API reference
+
+### Create schedule
+
+```http
+POST /jobs/:device
+Content-Type: application/json
+
+{
+  "automationType": "timeOfDay" | "duration",
+  "on": {
+    "utcDate": "HH:MM",    // for timeOfDay
+    "minutes": number,      // for duration
+    "mode": string
+  },
+  "off": {
+    "utcDate": "HH:MM",    // for timeOfDay
+    "minutes": number,      // for duration
+    "mode": string
+  }
+}
+```
+
+### Start schedule
+
+```http
+POST /jobs/:device/start
+```
+
+### Stop schedule
+
+```http
+POST /jobs/:device/stop
+```
+
+### Get schedule status
+
+```http
+GET /jobs/:device
+```
+
+### Get next execution
+
+```http
+GET /jobs/:device/next
+```
+
+### Delete schedule
+
+```http
+DELETE /jobs/:device
+```
+
+### Health check
+
+```http
+GET /api/health
+```
+
+## Environment variables
+
+Configure Baker service with these environment variables:
+
+```bash
+# Service configuration
+PORT=3000
+
+# External services
+POCKETBASE_URL=http://pocketbase:8090
+STREAM_API_URL=http://host.docker.internal:9997
+JOYSTICK_API_URL=http://joystick:8000
+
+# Authentication
+JWT_SECRET=your-secret-key
+```
+
+## Monitoring
+
+### Check Baker health
+
+```bash
+curl http://localhost:3000/api/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "service": "baker",
+  "uptime": 3600,
+  "timestamp": "2026-03-02T10:30:00.000Z",
+  "memory": {
+    "rss": 50331648,
+    "heapTotal": 18874368,
+    "heapUsed": 15234560
+  },
+  "version": "unknown"
+}
+```
+
+### View logs
+
+```bash
+# Real-time logs
+docker logs -f baker
+
+# Search for job execution
+docker logs baker 2>&1 | grep "Starting.*routine"
+
+# Check for errors
+docker logs baker 2>&1 | grep -i error
+```
+
+## Troubleshooting
+
+### Schedule not executing
+
+1. Verify schedule is started:
+   ```bash
+   curl http://localhost:3000/jobs/device123 | jq '.status.running'
+   ```
+
+2. Check next execution time:
+   ```bash
+   curl http://localhost:3000/jobs/device123/next
+   ```
+
+3. Review Baker logs for errors:
+   ```bash
+   docker logs baker | grep device123
+   ```
+
+4. Verify device exists in PocketBase:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/device123
+   ```
+
+### Wrong execution times
+
+1. Verify times are in UTC:
+   ```bash
+   date -u
+   ```
+
+2. Check device automation configuration:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/device123 | jq '.automation'
+   ```
+
+3. Validate time format is HH:MM (24-hour)
+
+### Device status not updating
+
+1. Check MediaMTX is accessible:
+   ```bash
+   curl http://localhost:9997/v3/paths/list
+   ```
+
+2. Verify Baker can connect to MediaMTX:
+   ```bash
+   docker exec baker curl http://host.docker.internal:9997/v3/paths/list
+   ```
+
+3. Check status update job is running:
+   ```bash
+   docker logs baker | grep "Updating status"
+   ```
+
+### Schedules lost after restart
+
+1. Verify device automation is saved to database:
+   ```bash
+   curl http://localhost:8090/api/collections/devices/records/device123 | jq '.automation'
+   ```
+
+2. Check Baker initialization logs:
+   ```bash
+   docker logs baker | grep "Initialized job"
+   ```
+
+3. Manually recreate the schedule if needed
+
+## Best practices
+
+<Tip>
+  **UTC times**: Always use UTC for time-of-day automation to avoid timezone confusion and daylight saving issues.
+</Tip>
+
+<Tip>
+  **Duration limits**: For duration-based automation, avoid very short on/off cycles (< 1 minute) to prevent excessive device switching.
+</Tip>
+
+<Tip>
+  **Testing**: Test schedules with short durations first, then adjust to production values once verified.
+</Tip>
+
+<Tip>
+  **Monitoring**: Regularly check the next execution time to ensure schedules are configured correctly.
+</Tip>
+
+<Tip>
+  **Graceful updates**: Stop schedules before updating automation configuration to prevent conflicts.
+</Tip>

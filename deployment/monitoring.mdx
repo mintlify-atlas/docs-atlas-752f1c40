@@ -1,0 +1,294 @@
+---
+title: Monitoring and logging
+description: Monitoring services and viewing logs in Joystick IoT platform
+---
+
+## Dozzle log viewer
+
+Joystick IoT platform includes Dozzle, a real-time log viewer for Docker containers.
+
+### Accessing Dozzle
+
+Dozzle is available at `http://localhost:8084` (or your configured host on port 8084).
+
+### Configuration
+
+```yaml
+dozzle:
+  image: amir20/dozzle:latest
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  ports:
+    - "8084:8080"
+```
+
+### Features
+
+- Real-time log streaming from all containers
+- Search and filter logs
+- Multi-container view
+- Dark mode support
+- No authentication required (ensure port 8084 is not exposed publicly)
+
+### Usage
+
+1. Open `http://localhost:8084` in your browser
+2. Select a container from the left sidebar
+3. View real-time logs in the main panel
+4. Use the search box to filter log entries
+5. Click on multiple containers to view logs from multiple services simultaneously
+
+## Log configuration
+
+All services use JSON file logging with automatic rotation:
+
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
+
+### Log rotation
+
+- **Maximum size**: 10MB per log file
+- **Maximum files**: 3 rotated files per container
+- **Format**: JSON for structured logging
+
+This configuration prevents logs from consuming excessive disk space while maintaining recent history.
+
+## Viewing logs via Docker CLI
+
+### View all container logs
+
+```bash
+docker-compose logs
+```
+
+### Follow logs in real-time
+
+```bash
+docker-compose logs -f
+```
+
+### View logs for specific service
+
+```bash
+docker-compose logs -f joystick
+```
+
+### View last N lines
+
+```bash
+docker-compose logs --tail=100 joystick
+```
+
+### View logs with timestamps
+
+```bash
+docker-compose logs -t joystick
+```
+
+### View logs since specific time
+
+```bash
+docker-compose logs --since 2024-01-01T00:00:00
+```
+
+## Service monitoring
+
+### Traefik dashboard
+
+Traefik provides a built-in dashboard at `http://localhost:8080`.
+
+**Features:**
+- View all configured routers and services
+- Monitor HTTP request rates
+- Check service health status
+- View middleware configuration
+
+**Note**: The dashboard runs in insecure mode by default. Disable it in production or add authentication:
+
+```yaml
+command:
+  - "--api.insecure=true"  # Remove this in production
+  - "--api.dashboard=true"
+```
+
+### MediaMTX monitoring
+
+MediaMTX provides an API for monitoring streams at `http://localhost:9997`.
+
+#### List all active paths
+
+```bash
+curl http://localhost:9997/v3/paths/list
+```
+
+#### Get path statistics
+
+```bash
+curl http://localhost:9997/v3/paths/get/{path_name}
+```
+
+#### Configuration
+
+MediaMTX API is configured in `mediamtx.yml`:
+
+```yaml
+# Enable the Control API
+api: yes
+# API listener address
+apiAddress: :9997
+# Allow CORS
+apiAllowOrigin: "*"
+```
+
+### Health check endpoints
+
+#### PocketBase health check
+
+```bash
+curl http://localhost:8090/api/health
+```
+
+#### Joystick API health check
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "service": "joystick",
+  "uptime": 12345.67,
+  "timestamp": "2024-01-01T12:00:00.000Z",
+  "memory": {
+    "rss": 12345678,
+    "heapTotal": 8765432,
+    "heapUsed": 6543210
+  },
+  "version": "1.0.0"
+}
+```
+
+## Container monitoring
+
+### View running containers
+
+```bash
+docker-compose ps
+```
+
+### View container resource usage
+
+```bash
+docker stats
+```
+
+This shows real-time CPU, memory, network, and disk I/O for all containers.
+
+### Inspect container details
+
+```bash
+docker inspect <container_name>
+```
+
+### View container processes
+
+```bash
+docker top <container_name>
+```
+
+## Production monitoring recommendations
+
+For production deployments, consider implementing:
+
+### External monitoring solutions
+
+- **Prometheus + Grafana**: Time-series metrics and dashboards
+- **ELK Stack** (Elasticsearch, Logstash, Kibana): Centralized log management
+- **Datadog**: Cloud-based monitoring and analytics
+- **New Relic**: Application performance monitoring
+
+### MediaMTX metrics
+
+Enable Prometheus metrics in `mediamtx.yml`:
+
+```yaml
+metrics: yes
+metricsAddress: :9998
+```
+
+Then scrape metrics at `http://localhost:9998/metrics`.
+
+### Alert configuration
+
+Set up alerts for:
+- Container health check failures
+- High CPU or memory usage
+- Disk space exhaustion
+- Failed authentication attempts
+- Stream connection failures
+
+## Log levels
+
+### Traefik log levels
+
+Adjust Traefik logging verbosity:
+
+```yaml
+command:
+  - "--log.level=INFO"  # DEBUG, INFO, WARN, ERROR
+```
+
+### MediaMTX log levels
+
+Configure in `mediamtx.yml`:
+
+```yaml
+logLevel: info  # error, warn, info, debug
+logDestinations: [stdout]
+```
+
+## Troubleshooting with logs
+
+Common issues and log patterns:
+
+### Service connection failures
+
+Look for:
+```
+connection refused
+no route to host
+timeout
+```
+
+Check service dependencies and network configuration.
+
+### Authentication errors
+
+Look for:
+```
+unauthorized
+forbidden
+invalid token
+```
+
+Verify API keys and JWT tokens in environment variables.
+
+### Database errors
+
+Look for:
+```
+failed to connect to database
+record not found
+constraint violation
+```
+
+Check PocketBase health and data integrity.
+
+See [troubleshooting](/deployment/troubleshooting) for more detailed debugging steps.

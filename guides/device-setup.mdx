@@ -1,0 +1,198 @@
+---
+title: Device setup
+description: Learn how to set up and configure devices in the Joystick IoT platform
+---
+
+Devices are the core entities in the Joystick platform. They represent physical IoT devices that can stream video, execute commands, and be managed remotely.
+
+## Initial device configuration
+
+<Steps>
+  <Step title="Add a new device">
+    Navigate to the devices section and click "Add Device" to create a new device entry.
+  </Step>
+
+  <Step title="Configure basic information">
+    Provide the following basic device information:
+    - **Name**: A unique identifier for the device
+    - **Model**: The device model type
+    - **Host**: The IP address or hostname of the device
+    - **Phone**: Optional phone number for SMS-based control
+  </Step>
+
+  <Step title="Set device credentials">
+    Configure authentication credentials if required by your device:
+    - Username and password for device access
+    - API keys or tokens for secure communication
+  </Step>
+
+  <Step title="Configure stream settings">
+    Set up the streaming configuration:
+    - Stream name (typically matches device name)
+    - Protocol (RTSP, WebRTC, etc.)
+    - Port configuration
+  </Step>
+
+  <Step title="Save and verify">
+    Save the device configuration and verify connectivity by checking the device status indicator.
+  </Step>
+</Steps>
+
+## Dual slot configuration
+
+Devices can be configured with dual connection slots for high availability and automatic failover.
+
+<Steps>
+  <Step title="Enable secondary slot">
+    In the device configuration, enable "Configure Secondary Connection Slot".
+  </Step>
+
+  <Step title="Configure secondary connection">
+    Provide the secondary connection details:
+    - **Secondary Host**: Backup IP address or hostname
+    - **Secondary Phone**: Optional backup phone number
+  </Step>
+
+  <Step title="Enable automatic slot switching">
+    Enable "Enable automatic slot switching" to allow the system to automatically failover between slots based on health checks.
+
+    <Warning>
+      Automatic slot switching requires both primary and secondary slots to be properly configured and the `slot-check` action to be defined.
+    </Warning>
+  </Step>
+
+  <Step title="Test failover">
+    Manually test the failover functionality using the Switcher service API:
+    ```bash
+    curl -X POST http://localhost:8080/api/slot/DEVICE_ID/secondary
+    ```
+  </Step>
+</Steps>
+
+## Device actions
+
+Device actions are configurable commands that can be executed on devices remotely.
+
+### Creating custom actions
+
+<Steps>
+  <Step title="Navigate to actions">
+    Access the PocketBase admin panel and navigate to the `actions` collection.
+  </Step>
+
+  <Step title="Create a new action">
+    Define a new action with:
+    - **Name**: Action identifier (e.g., `reboot`, `capture-image`)
+    - **Command**: The actual command to execute
+    - **Device**: Link to specific device or leave empty for global actions
+    - **Description**: Human-readable description
+  </Step>
+
+  <Step title="Use parameter templating">
+    Actions support dynamic parameter injection:
+    ```bash
+    # Example action with parameters
+    ffmpeg -i rtsp://{{host}}/stream -frames:v 1 /captures/{{device_id}}_{{timestamp}}.jpg
+    ```
+
+    Available template variables:
+    - `{{device_id}}` - Current device ID
+    - `{{host}}` - Device host address
+    - `{{timestamp}}` - Current timestamp
+    - `{{date}}` - Current date in YYYY-MM-DD format
+  </Step>
+</Steps>
+
+### Common actions
+
+Here are some common device actions you might configure:
+
+**Health Check** (`slot-check`)
+```bash
+ping -c 1 {{host}} || exit 1
+```
+
+**Reboot Device**
+```bash
+ssh {{host}} "sudo reboot"
+```
+
+**Capture Image**
+```bash
+ffmpeg -i rtsp://{{host}}/stream -frames:v 1 /tmp/capture.jpg
+```
+
+## Device status monitoring
+
+Devices can be in one of the following states:
+
+- **on**: Device is online and streaming
+- **off**: Device is offline or not streaming
+- **waiting**: Device is attempting to connect
+- **error**: Device encountered an error
+
+<Tip>
+  The Baker service automatically updates device status every 5 seconds by checking the MediaMTX API.
+</Tip>
+
+## Environment variables
+
+The following environment variables affect device management:
+
+```bash
+# Joystick service
+STREAM_API_URL=http://localhost:9997
+POCKETBASE_URL=http://localhost:8090
+SWITCHER_API_URL=http://localhost:8080
+
+# Switcher service (for dual slot devices)
+JOYSTICK_API_URL=http://localhost:8000
+JOYSTICK_API_KEY=your-api-key
+HEALTH_CHECK_ENABLED=true
+HEALTH_CHECK_INTERVAL=30000
+```
+
+## Troubleshooting
+
+### Device not connecting
+
+1. Verify the device host is reachable:
+   ```bash
+   ping DEVICE_HOST
+   ```
+
+2. Check device credentials are correct
+
+3. Verify the stream configuration matches the device output
+
+4. Check Joystick service logs:
+   ```bash
+   docker logs joystick
+   ```
+
+### Slot switching not working
+
+1. Verify both primary and secondary slots are configured
+
+2. Check that `autoSlotSwitch` is enabled for the device
+
+3. Verify the `slot-check` action exists in the database
+
+4. Check Switcher service health endpoint:
+   ```bash
+   curl http://localhost:8080/api/health/DEVICE_ID
+   ```
+
+### Status not updating
+
+1. Verify Baker service is running:
+   ```bash
+   docker logs baker
+   ```
+
+2. Check MediaMTX API is accessible:
+   ```bash
+   curl http://localhost:9997/v3/paths/list
+   ```
+
+3. Verify device stream name matches configuration

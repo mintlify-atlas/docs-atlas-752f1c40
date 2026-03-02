@@ -1,0 +1,379 @@
+---
+title: Media management
+description: Gallery endpoints for managing media events and files
+---
+
+The media management endpoints provide comprehensive control over device media events, including listing, uploading, downloading, and deleting media files.
+
+## Get device paths
+
+<Card title="GET /api/gallery/:device/paths" icon="folder">
+  Get the file system paths for uploading media to a device
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="paths" type="object" required>
+  File system paths for the device
+</ResponseField>
+
+<ResponseField name="paths.incoming" type="string">
+  Path where new files should be uploaded
+</ResponseField>
+
+<ResponseField name="paths.thumbnails" type="string">
+  Path where thumbnail files should be uploaded
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/gallery/device123/paths" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "paths": {
+    "incoming": "/data/gallery/device123/incoming",
+    "thumbnails": "/data/gallery/device123/thumbnails"
+  }
+}
+```
+
+## List media events
+
+<Card title="GET /api/gallery/:device/events" icon="images">
+  List all media events for a device with optional type filtering
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+### Query parameters
+
+<ParamField query="media_type" type="string">
+  Filter by media type: `image`, `video`, `audio`, `document`, `other`
+</ParamField>
+
+<ParamField query="limit" type="number" default={50}>
+  Maximum number of events to return
+</ParamField>
+
+<ParamField query="offset" type="number" default={0}>
+  Number of events to skip for pagination
+</ParamField>
+
+### Response
+
+Returns an array of event objects.
+
+<ResponseField name="id" type="string" required>
+  Unique event identifier
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Event filename
+</ResponseField>
+
+<ResponseField name="media_type" type="string" required>
+  Media type classification
+</ResponseField>
+
+<ResponseField name="size" type="number">
+  File size in bytes
+</ResponseField>
+
+<ResponseField name="has_thumbnail" type="boolean">
+  Whether a thumbnail is available
+</ResponseField>
+
+<ResponseField name="created" type="string">
+  ISO 8601 timestamp of event creation
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/gallery/device123/events?media_type=video" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Upload media event
+
+<Card title="POST /api/gallery/:device/upload" icon="upload">
+  Upload a media event with optional thumbnail
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+### Request body (multipart/form-data)
+
+<ParamField body="name" type="string" required>
+  Event filename
+</ParamField>
+
+<ParamField body="event" type="file" required>
+  Media file to upload
+</ParamField>
+
+<ParamField body="thumbnail" type="file">
+  Optional thumbnail image
+</ParamField>
+
+<ParamField body="media_type" type="string">
+  Media type: `image`, `video`, `audio`, `document`, `other`
+</ParamField>
+
+<ParamField body="has_thumbnail" type="boolean" default={false}>
+  Indicates if a thumbnail is included
+</ParamField>
+
+<ParamField body="metadata" type="string">
+  JSON string of additional metadata
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if upload was successful
+</ResponseField>
+
+<ResponseField name="eventId" type="string">
+  ID of the created event
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/gallery/device123/upload" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "name=capture.jpg" \
+  -F "event=@/path/to/capture.jpg" \
+  -F "media_type=image" \
+  -F "metadata={\"timestamp\":\"2024-03-20T10:00:00Z\"}"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "eventId": "evt_abc123"
+}
+```
+
+## Get upload URL
+
+<Card title="GET /api/gallery/:device/upload-url" icon="link">
+  Get pre-signed URLs for uploading media files
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+### Query parameters
+
+<ParamField query="filename" type="string" required>
+  Name of the file to upload
+</ParamField>
+
+<ParamField query="thumbnail" type="boolean" default={false}>
+  Whether to also get a thumbnail upload URL
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the request was successful
+</ResponseField>
+
+<ResponseField name="upload_url" type="string" required>
+  Pre-signed URL for uploading the media file
+</ResponseField>
+
+<ResponseField name="thumbnail_upload_url" type="string">
+  Pre-signed URL for uploading the thumbnail (if requested)
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/gallery/device123/upload-url?filename=video.mp4&thumbnail=true" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "upload_url": "https://storage.example.com/upload/abc123",
+  "thumbnail_upload_url": "https://storage.example.com/upload/thumb_abc123"
+}
+```
+
+**Upload to the pre-signed URL:**
+
+```bash
+curl -X PUT "https://storage.example.com/upload/abc123" \
+  --upload-file /path/to/video.mp4
+```
+
+## Get media statistics
+
+<Card title="GET /api/gallery/:device/stats" icon="chart-simple">
+  Get media statistics with type breakdown
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="total_events" type="number" required>
+  Total number of media events
+</ResponseField>
+
+<ResponseField name="total_size" type="number" required>
+  Total size of all media in bytes
+</ResponseField>
+
+<ResponseField name="by_type" type="object" required>
+  Breakdown of events and size by media type
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/gallery/device123/stats" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "total_events": 150,
+  "total_size": 2147483648,
+  "by_type": {
+    "image": {
+      "count": 100,
+      "size": 524288000
+    },
+    "video": {
+      "count": 45,
+      "size": 1610612736
+    },
+    "audio": {
+      "count": 5,
+      "size": 12582912
+    }
+  }
+}
+```
+
+## Delete media event
+
+<Card title="DELETE /api/gallery/:device/events/:eventId" icon="trash">
+  Delete a specific media event
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+<ParamField path="eventId" type="string" required>
+  Event identifier to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if deletion was successful
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X DELETE "http://localhost:8001/api/gallery/device123/events/evt_abc123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true
+}
+```
+
+## Pull specific event
+
+<Card title="POST /api/gallery/:device/pull/:eventId" icon="download">
+  Pull a specific event from the device
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  Device identifier
+</ParamField>
+
+<ParamField path="eventId" type="string" required>
+  Event identifier to pull from device
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the pull was successful
+</ResponseField>
+
+<ResponseField name="eventId" type="string">
+  ID of the pulled event
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/gallery/device123/pull/evt_abc123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "eventId": "evt_abc123"
+}
+```

@@ -1,0 +1,492 @@
+---
+title: Authentication & permissions
+description: Secure your Joystick API with JWT tokens, API keys, and permission-based access control
+---
+
+## Overview
+
+Joystick uses a multi-layered authentication system with support for JWT tokens, API keys, and internal network requests. Access control is enforced through user permissions and device-specific allow lists.
+
+## Authentication methods
+
+The platform supports three authentication methods, processed in this order:
+
+<Steps>
+  <Step title="Internal network detection">
+    Requests from internal IPs bypass token validation
+  </Step>
+  <Step title="API key validation">
+    Static keys for service-to-service communication
+  </Step>
+  <Step title="JWT token validation">
+    User authentication via PocketBase tokens
+  </Step>
+</Steps>
+
+### JWT authentication
+
+The primary method for user authentication using PocketBase-issued tokens.
+
+<Tabs>
+  <Tab title="Bearer header">
+    Standard OAuth 2.0 bearer token:
+
+    ```bash
+    curl -X POST http://localhost:8000/api/run/device_id/action_name \
+      -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+      -H "Content-Type: application/json" \
+      -d '{"param": "value"}'
+    ```
+  </Tab>
+
+  <Tab title="Query parameter">
+    Alternative for environments that don't support headers:
+
+    ```bash
+    curl -X POST "http://localhost:8000/api/run/device_id/action_name?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+      -H "Content-Type: application/json" \
+      -d '{"param": "value"}'
+    ```
+
+    <Warning>
+      Query parameter tokens appear in server logs. Use bearer headers in production.
+    </Warning>
+  </Tab>
+
+  <Tab title="Obtain token">
+    Get a JWT token from PocketBase:
+
+    ```bash
+    curl -X POST http://localhost:8090/api/collections/users/auth-with-password \
+      -H "Content-Type: application/json" \
+      -d '{
+        "identity": "user@example.com",
+        "password": "password"
+      }'
+    ```
+
+    Response:
+    ```json
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "record": {
+        "id": "user_id",
+        "email": "user@example.com",
+        "name": "User Name"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### API key authentication
+
+Static keys for service-to-service communication:
+
+```bash
+curl -X POST http://localhost:8000/api/run/device_id/action_name \
+  -H "X-API-Key: dev-api-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{"param": "value"}'
+```
+
+<CodeGroup>
+```yaml Default key (docker-compose.yml)
+environment:
+  - JOYSTICK_API_KEY=dev-api-key-12345
+```
+
+```bash Custom key
+export JOYSTICK_API_KEY=your-secure-api-key
+```
+</CodeGroup>
+
+<Note>
+  API key requests default to the system user unless `X-User` header specifies a different user ID.
+</Note>
+
+### Internal network requests
+
+Requests from internal IPs are automatically authenticated:
+
+```typescript packages/core/src/auth.ts
+const isInternalRequest = (
+  headers: Record<string, string | undefined>
+): boolean => {
+  const forwardedFor = headers["x-forwarded-for"];
+  const realIp = headers["x-real-ip"];
+  const remoteAddr = headers["x-remote-addr"];
+
+  const internalIps = [
+    "127.0.0.1",
+    "::1",
+    "localhost",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "10.0.0.0/8",
+  ];
+
+  const clientIp = forwardedFor || realIp || remoteAddr;
+  if (clientIp && internalIps.some((ip) => clientIp.includes(ip))) {
+    return true;
+  }
+
+  // Also check user agent for internal tools
+  const userAgent = headers["user-agent"];
+  if (
+    userAgent &&
+    (userAgent.includes("curl") ||
+      userAgent.includes("node") ||
+      userAgent.includes("bun"))
+  ) {
+    return true;
+  }
+
+  return false;
+};
+```
+
+<Info>
+  Internal requests are useful for Docker inter-service communication and local development.
+</Info>
+
+## Authentication context
+
+Each request creates an authentication context:
+
+```typescript packages/core/src/auth.ts
+export interface AuthContext {
+  user: any | null;           // PocketBase user record
+  userId: string | null;      // User ID or system user
+  isApiKey: boolean;          // True if API key auth
+  isInternal: boolean;        // True if internal network
+  isSuperuser: boolean;       // True if admin user
+}
+```
+
+The context is available in all route handlers:
+
+```typescript packages/joystick/src/index.ts
+.post("/api/run/:device/:action", async ({ params, body, auth }) => {
+  const userId = auth.userId || "system";
+  const userName = auth.user?.name || auth.user?.email || "system";
+  
+  // Use auth context for authorization
+});
+```
+
+## Token validation
+
+JWT tokens are validated by PocketBase:
+
+```typescript packages/core/src/auth.ts
+if (token) {
+  try {
+    const tempPb = new PocketBase(POCKETBASE_URL);
+    tempPb.authStore.save(token, null);
+
+    // Validate by refreshing
+    const authData = await tempPb.collection("users").authRefresh();
+
+    if (authData && authData.record) {
+      authContext.user = authData.record;
+      authContext.userId = authData.record.id;
+    } else {
+      // Try superuser collection
+      const authData = await tempPb
+        .collection("_superusers")
+        .authRefresh();
+      if (authData && authData.record) {
+        authContext.isSuperuser = !!authData.record.isSuperuser;
+        authContext.user = authData.record;
+        authContext.userId = authData.record.id;
+      }
+    }
+    return { auth: authContext };
+  } catch (error) {
+    console.error("PocketBase token validation failed:", error);
+  }
+}
+
+return status(401, "Unauthorized");
+```
+
+## Permission system
+
+Joystick uses a feature-based permission system for fine-grained access control.
+
+### Permission structure
+
+```typescript packages/core/src/types/db.types.ts
+export type PermissionsRecord = {
+  id: string;
+  name: string;              // Permission identifier
+  users: RecordIdString[];   // Users with this permission
+  created?: IsoDateString;
+  updated?: IsoDateString;
+};
+```
+
+### Built-in permissions
+
+<AccordionGroup>
+  <Accordion title="Sensor data permissions">
+    - `device-cpsi` - Access cellular signal information
+    - `device-battery` - View battery telemetry
+    - `device-gps` - Read GPS coordinates
+    - `device-imu` - Access IMU sensor data
+  </Accordion>
+
+  <Accordion title="System permissions">
+    - `notifications` - Send platform notifications
+    - `admin` - Full administrative access
+  </Accordion>
+</AccordionGroup>
+
+### Permission example
+
+```json
+{
+  "id": "perm_123",
+  "name": "device-cpsi",
+  "users": [
+    "user_abc",
+    "user_def",
+    "user_ghi"
+  ]
+}
+```
+
+## Device access control
+
+Devices use an `allow` list to restrict control access:
+
+```typescript packages/core/src/types/db.types.ts
+export type DevicesRecord = {
+  id: string;
+  name?: string;
+  allow?: RecordIdString[];  // Authorized user IDs
+  // ...
+};
+```
+
+### Access enforcement
+
+When executing actions, the platform verifies the user is in the device's `allow` list:
+
+```typescript packages/joystick/src/index.ts
+const userId = auth.userId || "system";
+const userPb = auth.isApiKey || auth.isInternal 
+  ? pb 
+  : await tryImpersonate(userId);
+
+const result = await userPb
+  .collection("devices")
+  .getFullList<DeviceResponse>(1, {
+    filter: `id = "${params.device}"`,
+  });
+
+if (result.length !== 1) {
+  throw new Error(`Device ${params.device} not found`);
+}
+```
+
+<Warning>
+  If a user is not in the `allow` list, PocketBase returns no results, preventing unauthorized access.
+</Warning>
+
+### Impersonation
+
+The platform impersonates users to enforce PocketBase collection rules:
+
+```typescript
+const tryImpersonate = async (userId: string) => {
+  const tempPb = new PocketBase(POCKETBASE_URL);
+  // Set user context for collection rule evaluation
+  tempPb.authStore.save(token, { id: userId });
+  return tempPb;
+};
+```
+
+## Authorization flow
+
+Complete authorization flow for device actions:
+
+```mermaid
+graph TD
+    A[Request] --> B{Internal IP?}
+    B -->|Yes| C[Grant access as system]
+    B -->|No| D{API Key valid?}
+    D -->|Yes| E[Grant access as system or X-User]
+    D -->|No| F{JWT valid?}
+    F -->|Yes| G{User in device.allow?}
+    F -->|No| H[401 Unauthorized]
+    G -->|Yes| I{Has required permissions?}
+    G -->|No| J[403 Forbidden - Device access denied]
+    I -->|Yes| K[Execute action]
+    I -->|No| L[403 Forbidden - Missing permissions]
+```
+
+## Swagger documentation
+
+The API includes OpenAPI documentation with auth examples:
+
+```typescript packages/joystick/src/index.ts
+.use(
+  swagger({
+    documentation: {
+      info: {
+        title: "Joystick API",
+        version: "0.0.0",
+      },
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+          },
+          apiKey: {
+            type: "apiKey",
+            in: "header",
+            name: "X-API-Key",
+          },
+        },
+      },
+      security: [{ bearerAuth: [] }, { apiKey: [] }],
+    },
+  })
+)
+```
+
+Access interactive docs at:
+```
+http://localhost:8000/swagger
+```
+
+## Error responses
+
+<Tabs>
+  <Tab title="401 Unauthorized">
+    Invalid or missing authentication:
+
+    ```json
+    {
+      "success": false,
+      "error": "Authentication required"
+    }
+    ```
+
+    Common causes:
+    - Missing Authorization header
+    - Expired JWT token
+    - Invalid API key
+  </Tab>
+
+  <Tab title="403 Forbidden (Permissions)">
+    User lacks required permissions:
+
+    ```json
+    {
+      "success": false,
+      "error": "Missing required permissions: device-cpsi"
+    }
+    ```
+
+    Solution: Add user to the permission's `users` array
+  </Tab>
+
+  <Tab title="403 Forbidden (Device access)">
+    User not in device allow list:
+
+    ```json
+    {
+      "success": false,
+      "error": "Access denied: You don't have permission to control this device"
+    }
+    ```
+
+    Solution: Add user ID to device's `allow` array
+  </Tab>
+</Tabs>
+
+## Security best practices
+
+<AccordionGroup>
+  <Accordion title="Token management">
+    - Store tokens securely (never in localStorage for sensitive apps)
+    - Implement token refresh before expiration
+    - Use short-lived tokens (15-60 minutes)
+    - Revoke tokens on logout
+  </Accordion>
+
+  <Accordion title="API keys">
+    - Rotate API keys regularly
+    - Use different keys per environment
+    - Never commit keys to version control
+    - Limit API key usage to internal services
+  </Accordion>
+
+  <Accordion title="Network security">
+    - Use HTTPS in production
+    - Configure proper CORS policies
+    - Implement rate limiting
+    - Monitor authentication failures
+  </Accordion>
+
+  <Accordion title="Access control">
+    - Follow principle of least privilege
+    - Regularly audit device allow lists
+    - Remove access when users leave
+    - Use permissions for feature gating
+  </Accordion>
+</AccordionGroup>
+
+## User context in actions
+
+Actions receive user context for logging and authorization:
+
+```typescript packages/joystick/src/index.ts
+const userId = auth.userId || "system";
+const userName = auth.user?.name || auth.user?.email || "system";
+
+// Pass to action parser
+const command = parseActionCommand(
+  device,
+  run.command,
+  body as Record<string, unknown>,
+  { userId }
+);
+
+// Log execution
+enhancedLogger.info(
+  {
+    user: { name: userName, id: userId },
+    device,
+    action: params.action,
+  },
+  "Command executed successfully"
+);
+```
+
+The `$userId` parameter is available in action commands:
+
+```json
+{
+  "command": "logger 'Command executed by $userId'"
+}
+```
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="PocketBase Auth" icon="database" href="https://pocketbase.io/docs/authentication/">
+    PocketBase authentication documentation
+  </Card>
+  <Card title="Devices" icon="microchip" href="/concepts/devices">
+    Configure device access control
+  </Card>
+  <Card title="Actions" icon="bolt" href="/concepts/actions">
+    Execute authenticated actions
+  </Card>
+</CardGroup>

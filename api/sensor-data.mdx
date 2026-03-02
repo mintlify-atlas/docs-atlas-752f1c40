@@ -1,0 +1,238 @@
+---
+title: Sensor data
+description: Retrieve sensor data from CPSI, battery, GPS, and IMU endpoints
+---
+
+The sensor data endpoints provide access to simulated and real-time sensor readings from IoT devices. These endpoints require specific permissions for access.
+
+## CPSI data
+
+<Card title="GET /api/cpsi" icon="signal">
+  Retrieve CPSI (Cell Performance Signaling Information) data
+</Card>
+
+### Authentication
+
+Requires `device-cpsi` permission.
+
+### Response
+
+<ResponseField name="cpsi" type="object" required>
+  CPSI measurement data with signal quality metrics
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X GET http://localhost:8000/api/cpsi \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "mode": "LTE",
+  "mcc": 310,
+  "mnc": 260,
+  "lac": 1234,
+  "cellId": 56789,
+  "rssi": -75,
+  "rsrp": -95,
+  "rsrq": -10,
+  "sinr": 12
+}
+```
+
+<ResponseField name="mode" type="string">
+  Network mode (e.g., LTE, 5G, 3G)
+</ResponseField>
+
+<ResponseField name="mcc" type="number">
+  Mobile Country Code
+</ResponseField>
+
+<ResponseField name="mnc" type="number">
+  Mobile Network Code
+</ResponseField>
+
+<ResponseField name="lac" type="number">
+  Location Area Code
+</ResponseField>
+
+<ResponseField name="cellId" type="number">
+  Cell tower identifier
+</ResponseField>
+
+<ResponseField name="rssi" type="number">
+  Received Signal Strength Indicator (dBm)
+</ResponseField>
+
+<ResponseField name="rsrp" type="number">
+  Reference Signal Received Power (dBm)
+</ResponseField>
+
+<ResponseField name="rsrq" type="number">
+  Reference Signal Received Quality (dB)
+</ResponseField>
+
+<ResponseField name="sinr" type="number">
+  Signal-to-Interference-plus-Noise Ratio (dB)
+</ResponseField>
+
+## Battery data
+
+<Card title="GET /api/battery" icon="battery-full">
+  Retrieve battery voltage, current, and power consumption data
+</Card>
+
+### Authentication
+
+Requires `device-battery` permission.
+
+### Response
+
+<ResponseField name="voltage" type="number" required>
+  Battery voltage in millivolts (mV). Range: 3200-4500 mV
+</ResponseField>
+
+<ResponseField name="current" type="number" required>
+  Battery current in milliamps (mA). Range: 50-500 mA
+</ResponseField>
+
+<ResponseField name="power" type="number" required>
+  Power consumption in milliwatts (mW). Calculated as voltage × current
+</ResponseField>
+
+<ResponseField name="consumption" type="number" required>
+  Total power consumption in milliwatt-hours (mWh). Range: 0-1400 mWh
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X GET http://localhost:8000/api/battery \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+{
+  "voltage": 3842.57,
+  "current": 234.12,
+  "power": 899851.34,
+  "consumption": 567.89
+}
+```
+
+## GPS data
+
+<Card title="GET /api/gps" icon="location-dot">
+  Retrieve GPS coordinates and altitude information
+</Card>
+
+### Authentication
+
+Requires `device-gps` permission.
+
+### Response
+
+<ResponseField name="latitude" type="number" required>
+  Latitude in decimal degrees. Range: -90 to 90
+</ResponseField>
+
+<ResponseField name="longitude" type="number" required>
+  Longitude in decimal degrees. Range: -180 to 180
+</ResponseField>
+
+<ResponseField name="altitude" type="number" required>
+  Altitude in meters above sea level. Range: 10-110 meters
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X GET http://localhost:8000/api/gps \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "latitude": 37.778956,
+  "longitude": -122.412384,
+  "altitude": 45.78
+}
+```
+
+## IMU data
+
+<Card title="GET /api/imu" icon="compass">
+  Retrieve IMU (Inertial Measurement Unit) accelerometer data
+</Card>
+
+### Authentication
+
+Requires `device-imu` permission.
+
+### Response
+
+<ResponseField name="x" type="number" required>
+  X-axis acceleration in g-force
+</ResponseField>
+
+<ResponseField name="y" type="number" required>
+  Y-axis acceleration in g-force
+</ResponseField>
+
+<ResponseField name="z" type="number" required>
+  Z-axis acceleration in g-force
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X GET http://localhost:8000/api/imu \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "x": 0.234,
+  "y": -0.145,
+  "z": 1.023
+}
+```
+
+## Error responses
+
+### 401 Unauthorized
+
+```json
+{
+  "success": false,
+  "error": "Authentication required"
+}
+```
+
+### 403 Forbidden
+
+```json
+{
+  "success": false,
+  "error": "Missing required permissions: device-gps"
+}
+```
+
+## Data generation
+
+The sensor data endpoints currently return simulated data for development and testing purposes. The values:
+
+- Follow realistic ranges for each sensor type
+- Include randomization for realistic variation
+- Update in real-time with each request
+- Can be used to test UI components and data visualization

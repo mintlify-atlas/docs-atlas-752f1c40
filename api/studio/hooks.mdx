@@ -1,0 +1,343 @@
+---
+title: Hooks
+description: Event-based hook system for executing device actions
+---
+
+The hook system allows you to automatically execute device actions in response to specific events in the media processing pipeline. Hooks can be device-specific or global.
+
+## Hook event types
+
+The Studio service supports 7 different hook event types:
+
+1. **after_event_pulled** - After an event is successfully pulled from device
+2. **after_all_events_pulled** - After all events in a batch are processed
+3. **after_event_processed** - After an event is processed and stored
+4. **after_thumbnail_generated** - After a thumbnail is generated for an event
+5. **on_file_detected** - When a new file is detected in the incoming directory
+6. **on_error** - When an error occurs during processing
+7. **on_service_start** - When the media service starts for a device
+
+## List hooks
+
+<Card title="GET /api/hooks" icon="list">
+  List all hooks with optional device filtering
+</Card>
+
+### Query parameters
+
+<ParamField query="deviceId" type="string">
+  Filter hooks by device ID. Omit to get all hooks.
+</ParamField>
+
+### Response
+
+Returns an array of hook objects.
+
+<ResponseField name="id" type="string" required>
+  Unique hook identifier
+</ResponseField>
+
+<ResponseField name="event" type="string" required>
+  Hook event type
+</ResponseField>
+
+<ResponseField name="action" type="string" required>
+  Action name to execute
+</ResponseField>
+
+<ResponseField name="deviceId" type="string">
+  Device ID for device-specific hooks, or null for global hooks
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean" required>
+  Whether the hook is active
+</ResponseField>
+
+<ResponseField name="parameters" type="object">
+  Parameters to pass to the action
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/hooks?deviceId=device123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "hook_abc123",
+    "event": "after_event_pulled",
+    "action": "process-event",
+    "deviceId": "device123",
+    "enabled": true,
+    "parameters": {
+      "quality": "high"
+    }
+  }
+]
+```
+
+## Create hook
+
+<Card title="POST /api/hooks" icon="plus">
+  Create a new event hook
+</Card>
+
+### Request body
+
+<ParamField body="event" type="string" required>
+  Hook event type. Must be one of the 7 supported event types.
+</ParamField>
+
+<ParamField body="action" type="string" required>
+  Name of the action to execute when the event occurs
+</ParamField>
+
+<ParamField body="deviceId" type="string">
+  Device ID for device-specific hook. Omit for global hook that applies to all devices.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default={true}>
+  Whether the hook is active
+</ParamField>
+
+<ParamField body="parameters" type="object">
+  Parameters to pass to the action. Supports template variables.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string" required>
+  ID of the created hook
+</ResponseField>
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if creation was successful
+</ResponseField>
+
+### Example: Create device-specific hook
+
+```bash
+curl -X POST "http://localhost:8001/api/hooks" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "after_event_pulled",
+    "action": "remove-event",
+    "deviceId": "device123",
+    "enabled": true,
+    "parameters": {
+      "event_name": "{{event_name}}"
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "id": "hook_xyz789"
+}
+```
+
+### Example: Create global hook
+
+```bash
+curl -X POST "http://localhost:8001/api/hooks" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "on_error",
+    "action": "send-alert",
+    "enabled": true,
+    "parameters": {
+      "severity": "error",
+      "message": "Media processing error on {{device_id}}"
+    }
+  }'
+```
+
+## Update hook
+
+<Card title="PATCH /api/hooks/:id" icon="pen">
+  Update an existing hook
+</Card>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  Hook identifier
+</ParamField>
+
+### Request body
+
+<ParamField body="event" type="string">
+  Hook event type
+</ParamField>
+
+<ParamField body="action" type="string">
+  Action name to execute
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Whether the hook is active
+</ParamField>
+
+<ParamField body="parameters" type="object">
+  Parameters to pass to the action
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if update was successful
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X PATCH "http://localhost:8001/api/hooks/hook_abc123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": false
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true
+}
+```
+
+## Delete hook
+
+<Card title="DELETE /api/hooks/:id" icon="trash">
+  Delete a hook
+</Card>
+
+### Path parameters
+
+<ParamField path="id" type="string" required>
+  Hook identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if deletion was successful
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X DELETE "http://localhost:8001/api/hooks/hook_abc123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true
+}
+```
+
+## Get hooks by event type
+
+<Card title="GET /api/hooks/events/:eventType" icon="filter">
+  Get all hooks for a specific event type
+</Card>
+
+### Path parameters
+
+<ParamField path="eventType" type="string" required>
+  Event type to filter by
+</ParamField>
+
+### Response
+
+Returns an array of hook objects matching the event type.
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/hooks/events/after_event_pulled" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "hook_abc123",
+    "event": "after_event_pulled",
+    "action": "remove-event",
+    "deviceId": "device123",
+    "enabled": true,
+    "parameters": {
+      "event_name": "{{event_name}}"
+    }
+  },
+  {
+    "id": "hook_def456",
+    "event": "after_event_pulled",
+    "action": "process-video",
+    "deviceId": "device456",
+    "enabled": true,
+    "parameters": {}
+  }
+]
+```
+
+## Parameter templating
+
+Hook parameters support dynamic template variables that are automatically replaced with context values:
+
+- `{{device_id}}` - Current device ID
+- `{{event_name}}` - Event filename
+- `{{media_type}}` - Media type (image, video, audio, etc.)
+- `{{file_path}}` - Full file path
+- `{{timestamp}}` - Current timestamp
+- `{{date}}` - Current date in YYYY-MM-DD format
+
+### Example with templates
+
+```json
+{
+  "event": "after_event_pulled",
+  "action": "process-event",
+  "parameters": {
+    "input": "{{file_path}}",
+    "output": "/processed/{{device_id}}/{{event_name}}",
+    "date": "{{date}}"
+  }
+}
+```
+
+When executed, templates are replaced:
+
+```json
+{
+  "input": "/data/gallery/device123/processed/video.mp4",
+  "output": "/processed/device123/video.mp4",
+  "date": "2024-03-20"
+}
+```
+
+## Hook execution flow
+
+1. **Event occurs** - Media processing triggers an event
+2. **Hook lookup** - System finds all enabled hooks for the event type
+3. **Device filtering** - Applies device-specific and global hooks
+4. **Parameter injection** - Replaces template variables with actual values
+5. **Action execution** - Calls the configured action with parameters
+6. **Error handling** - Logs failures but doesn't interrupt processing

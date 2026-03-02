@@ -1,0 +1,304 @@
+---
+title: Joystick service
+description: Command runner API for executing device actions
+---
+
+The Joystick service is the core command execution engine of the platform. It handles running actions on devices, managing notifications, and providing telemetry endpoints.
+
+## Overview
+
+Joystick provides a RESTful API for executing device actions with parameter validation, authentication, and comprehensive logging. Built with Elysia and Bun runtime.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+joystick:
+  image: ghcr.io/skylineagle/joystick/joystick:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - STREAM_API_URL=http://host.docker.internal:9997
+    - POCKETBASE_URL=http://pocketbase:8090
+    - SWITCHER_API_URL=http://switcher:8080
+    - PORT=8000
+    - HOST=0.0.0.0
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+  ports:
+    - "8000:8000"
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8000` |
+| `HOST` | Bind address | `0.0.0.0` |
+| `STREAM_API_URL` | MediaMTX API endpoint | Required |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+| `SWITCHER_API_URL` | Switcher service URL | Required |
+
+## API endpoints
+
+### Command execution
+
+#### Run device action
+
+```http
+POST /api/run/:device/:action
+```
+
+Execute an action on a specific device with optional parameters.
+
+**Authentication:** Bearer token or API key
+
+**Parameters:**
+- `device` - Device ID
+- `action` - Action name
+
+**Request body:**
+```json
+{
+  "param1": "value1",
+  "param2": "value2"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "output": "command output"
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8000/api/run/device123/reboot" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"delay": 5}'
+```
+
+### Device monitoring
+
+#### Ping device
+
+```http
+GET /api/ping/:device
+```
+
+Check device connectivity using ICMP ping.
+
+**Response:**
+```json
+true
+```
+
+### Telemetry endpoints
+
+#### CPSI data
+
+```http
+GET /api/cpsi
+```
+
+Get cellular signal strength information.
+
+#### Battery status
+
+```http
+GET /api/battery
+```
+
+Get battery voltage, current, and power consumption.
+
+**Response:**
+```json
+{
+  "voltage": 3850.50,
+  "current": 250.75,
+  "power": 965568.88,
+  "consumption": 842.35
+}
+```
+
+#### GPS location
+
+```http
+GET /api/gps
+```
+
+Get GPS coordinates and altitude.
+
+**Response:**
+```json
+{
+  "latitude": 37.774929,
+  "longitude": -122.419416,
+  "altitude": 45.32
+}
+```
+
+#### IMU data
+
+```http
+GET /api/imu
+```
+
+Get accelerometer/gyroscope data.
+
+**Response:**
+```json
+{
+  "x": 0.123,
+  "y": -0.045,
+  "z": 0.987
+}
+```
+
+### Notifications
+
+#### WebSocket connection
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/notifications');
+
+ws.onmessage = (event) => {
+  const notification = JSON.parse(event.data);
+  console.log(notification);
+};
+```
+
+#### Send notification
+
+```http
+POST /api/notifications/send
+```
+
+**Request body:**
+```json
+{
+  "type": "info",
+  "title": "Device alert",
+  "message": "Device is offline",
+  "deviceId": "device123",
+  "dismissible": true,
+  "metadata": {}
+}
+```
+
+**Notification types:**
+- `info`
+- `success`
+- `warning`
+- `error`
+- `emergency`
+
+### Health check
+
+```http
+GET /api/health
+```
+
+Returns service health status.
+
+## Authentication
+
+The service supports two authentication methods:
+
+### Bearer token
+
+```bash
+curl -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  http://localhost:8000/api/run/device123/action
+```
+
+### API key
+
+```bash
+curl -H "X-API-Key: YOUR_API_KEY" \
+  http://localhost:8000/api/run/device123/action
+```
+
+## Action execution flow
+
+1. **Authentication** - Validate user token or API key
+2. **Device lookup** - Fetch device from PocketBase
+3. **Action validation** - Verify action exists for device
+4. **Parameter validation** - Validate request against JSON schema
+5. **Command parsing** - Parse action command template
+6. **Execution** - Run on device or locally based on target
+7. **Response** - Return output and update device state
+8. **Logging** - Log execution details and timing
+
+## Command targets
+
+Actions can run in two modes:
+
+### Device target
+
+Commands execute on the remote device via SSH or ADB:
+
+```javascript
+await runCommandOnDevice(device, command);
+```
+
+### Local target
+
+Commands execute on the Joystick service host:
+
+```javascript
+await $`${command}`.text();
+```
+
+## Integration with other services
+
+- **Pocketbase** - Stores devices, actions, and run configurations
+- **Switcher** - Uses Joystick to execute mode changes
+- **Baker** - Executes scheduled actions via Joystick API
+- **Studio** - Triggers media-related device actions
+- **Whisper** - Sends commands via Joystick
+
+## Logging
+
+The service uses enhanced logging with request timing:
+
+```javascript
+enhancedLogger.info({
+  user: { name: userName, id: userId },
+  device,
+  action: 'reboot',
+  response
+}, 'Command executed successfully');
+```
+
+## Error handling
+
+Errors return with appropriate HTTP status codes:
+
+```json
+{
+  "success": false,
+  "error": "Device device123 not found"
+}
+```
+
+## Traefik routing
+
+The service is exposed via Traefik at `/joystick` path:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.joystick.rule=Host(${HOST}) && PathPrefix(`/joystick`)"
+  - "traefik.http.middlewares.joystick-strip.stripprefix.prefixes=/joystick"
+  - "traefik.http.routers.joystick.middlewares=joystick-strip,cors"
+```

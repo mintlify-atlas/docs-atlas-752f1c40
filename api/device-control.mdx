@@ -1,0 +1,193 @@
+---
+title: Device control
+description: Execute actions on IoT devices using the device control endpoint
+---
+
+The device control endpoint allows you to execute configured actions on IoT devices with parameter validation and real-time execution tracking.
+
+## Execute device action
+
+<Card title="POST /api/run/:device/:action" icon="play">
+  Execute a configured action on a specific device
+</Card>
+
+### Path parameters
+
+<ParamField path="device" type="string" required>
+  The unique identifier of the device to control
+</ParamField>
+
+<ParamField path="action" type="string" required>
+  The name of the action to execute (e.g., `capture`, `set-mode`, `reboot`)
+</ParamField>
+
+### Request body
+
+<ParamField body="parameters" type="object">
+  Optional parameters for the action. The schema is validated against the action's configured parameter schema.
+  
+  Example for `set-mode` action:
+  ```json
+  {
+    "mode": "autonomous"
+  }
+  ```
+</ParamField>
+
+### Headers
+
+<ParamField header="Authorization" type="string" required>
+  Bearer token or use `X-API-Key` header for API key authentication
+</ParamField>
+
+<ParamField header="Content-Type" type="string" default="application/json">
+  Must be `application/json` when sending parameters
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates whether the action was executed successfully
+</ResponseField>
+
+<ResponseField name="output" type="string">
+  The output from the executed command (present on success)
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong (present on failure)
+</ResponseField>
+
+### Example: Execute action without parameters
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/capture \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "output": "Image captured successfully: /events/capture_20240320_100530.jpg"
+}
+```
+
+### Example: Execute action with parameters
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/set-mode \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "autonomous"}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "output": "Mode set to autonomous"
+}
+```
+
+## Action execution flow
+
+1. **Authentication** - Validates user credentials and device access
+2. **Device lookup** - Retrieves device configuration from database
+3. **Action lookup** - Finds the action configuration by name
+4. **Permission check** - Verifies the action is configured for this device
+5. **Parameter validation** - Validates request body against action schema
+6. **Command parsing** - Parses the action command with provided parameters
+7. **Execution** - Runs command on device or locally based on target configuration
+8. **Response** - Returns execution output or error
+
+## Action targets
+
+Actions can be configured to run in two different targets:
+
+- **device** - Command executes on the IoT device via SSH/network connection
+- **local** - Command executes on the Joystick API server
+
+## Special actions
+
+### set-mode
+
+The `set-mode` action has special handling that updates the device's mode field in the database after successful execution:
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/set-mode \
+  -H "X-API-Key: dev-api-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "manual"}'
+```
+
+## Error responses
+
+### 404 Device not found
+
+```json
+{
+  "success": false,
+  "error": "Device device123 not found"
+}
+```
+
+### 404 Action not found
+
+```json
+{
+  "success": false,
+  "error": "Action capture not found"
+}
+```
+
+### 404 Action not configured for device
+
+```json
+{
+  "success": false,
+  "error": "Action capture not found for device MyDevice"
+}
+```
+
+### 400 Missing parameters
+
+```json
+{
+  "success": false,
+  "error": "Parameters are required for this action"
+}
+```
+
+### 400 Invalid parameters
+
+```json
+{
+  "success": false,
+  "error": "Invalid parameters for this action"
+}
+```
+
+### 500 Execution failed
+
+```json
+{
+  "success": false,
+  "error": "Command execution failed: Connection timeout"
+}
+```
+
+## Logging and monitoring
+
+All action executions are logged with the following information:
+
+- User ID and name
+- Device ID and details
+- Action name
+- Parameters provided
+- Execution duration
+- Success/failure status
+- Output or error message

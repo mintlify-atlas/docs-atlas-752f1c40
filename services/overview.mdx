@@ -1,0 +1,108 @@
+---
+title: Services overview
+description: Understanding the Joystick IoT platform microservices architecture
+---
+
+The Joystick IoT platform is built on a microservices architecture, with each service handling specific responsibilities. All services communicate through a common network and are orchestrated using Docker Compose.
+
+## Core services
+
+<CardGroup cols={2}>
+  <Card title="Joystick" icon="gamepad" href="/services/joystick">
+    Command runner API for executing device actions
+  </Card>
+  <Card title="Studio" icon="images" href="/services/studio">
+    Media management and event harvesting service
+  </Card>
+  <Card title="Switcher" icon="arrows-rotate" href="/services/switcher">
+    Automatic slot switching and stream management
+  </Card>
+  <Card title="Baker" icon="clock" href="/services/baker">
+    Scheduled actions and cron job management
+  </Card>
+</CardGroup>
+
+## Support services
+
+<CardGroup cols={2}>
+  <Card title="Whisper" icon="message" href="/services/whisper">
+    SMS gateway for device communication
+  </Card>
+  <Card title="Panel" icon="display" href="/services/panel">
+    Panel UI service for device control
+  </Card>
+  <Card title="Pocketbase" icon="database" href="/services/pocketbase">
+    Database and authentication backend
+  </Card>
+  <Card title="MediaMTX" icon="video" href="/services/mediamtx">
+    Real-time streaming server
+  </Card>
+</CardGroup>
+
+## Infrastructure
+
+<CardGroup cols={1}>
+  <Card title="Traefik" icon="route" href="/services/traefik">
+    Reverse proxy and routing layer
+  </Card>
+</CardGroup>
+
+## Service communication
+
+All services communicate within the `app-network` Docker network. Key integration points:
+
+- **Pocketbase** - Central database accessed by all services
+- **MediaMTX** - Streaming server accessed via host network
+- **Joystick** - Command execution used by Baker, Switcher, and Studio
+- **Traefik** - HTTP routing for all web services
+
+## Common configuration
+
+All services share common Docker Compose configurations:
+
+```yaml
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-platform-restart: &default-platform-restart
+  platform: linux/amd64
+  restart: unless-stopped
+```
+
+## Health monitoring
+
+Most services expose a `/api/health` endpoint that returns:
+
+```json
+{
+  "status": "healthy",
+  "service": "service-name",
+  "uptime": 12345,
+  "timestamp": "2024-03-20T10:00:00Z",
+  "memory": {},
+  "version": "0.0.0"
+}
+```
+
+## Environment variables
+
+Common environment variables across services:
+
+- `PORT` - Service port number
+- `POCKETBASE_URL` - PocketBase connection URL
+- `STREAM_API_URL` - MediaMTX API URL
+- `JOYSTICK_API_URL` - Joystick service URL
+- `JOYSTICK_API_KEY` - API key for inter-service communication
+
+## Service dependencies
+
+Services have dependency chains to ensure proper startup order:
+
+1. **Traefik** - No dependencies
+2. **MediaMTX** - No dependencies
+3. **Pocketbase** - No dependencies (but required by others)
+4. **Joystick** - Depends on Pocketbase, MediaMTX
+5. **Panel, Baker, Switcher, Whisper, Studio** - Depend on Pocketbase, MediaMTX

@@ -1,0 +1,418 @@
+---
+title: Panel service
+description: Panel UI service for device control interface
+---
+
+Panel is a web-based UI service that provides an interface for controlling and monitoring devices in the Joystick IoT platform.
+
+## Overview
+
+Panel offers a user interface for device management, action execution, real-time monitoring, and system configuration. Built with Elysia and integrated with PocketBase for authentication and data.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+panel:
+  image: ghcr.io/skylineagle/joystick/panel:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - POCKETBASE_URL=http://pocketbase:8090
+    - PORT=4000
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `4000` |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+
+## Dependencies
+
+Panel uses minimal dependencies:
+
+```json
+{
+  "@joystick/core": "workspace:*",
+  "elysia": "^1.1.31",
+  "pocketbase": "^0.25.2",
+  "@elysiajs/cors": "^1.1.1",
+  "@elysiajs/swagger": "^1.1.5",
+  "pino": "^9.7.0"
+}
+```
+
+## Features
+
+### Device management
+
+- **Device list** - View all registered devices
+- **Device details** - View device information and status
+- **Device configuration** - Edit device settings
+- **Connection management** - Configure primary and secondary slots
+
+### Action execution
+
+- **Quick actions** - Execute common device actions
+- **Custom actions** - Run any configured action
+- **Parameter input** - Provide action parameters
+- **Execution history** - View past action executions
+
+### Real-time monitoring
+
+- **Live streams** - View device video streams
+- **Status indicators** - Real-time device status
+- **Health monitoring** - Slot health and connectivity
+- **Telemetry data** - Battery, GPS, IMU data
+
+### Media gallery
+
+- **Event browsing** - View captured media events
+- **Thumbnail preview** - Quick media preview
+- **Download media** - Download event files
+- **Delete events** - Remove old media
+
+## User interface components
+
+### Device list view
+
+Main dashboard showing all devices:
+
+- Device name and status
+- Current mode (live, off, auto)
+- Active slot indicator
+- Quick action buttons
+
+### Device detail view
+
+Detailed device information:
+
+- Device configuration
+- Connection settings
+- Action controls
+- Status metrics
+
+### Stream viewer
+
+Real-time video streaming:
+
+- WebRTC or HLS streams
+- Full-screen mode
+- Stream quality controls
+- Recording controls
+
+### Media gallery
+
+Browse device media:
+
+- Grid view of events
+- Thumbnail previews
+- Filter by type and date
+- Bulk operations
+
+## API endpoints
+
+Panel provides API endpoints for the UI:
+
+### Get devices
+
+```http
+GET /api/devices
+```
+
+List all devices.
+
+### Get device details
+
+```http
+GET /api/devices/:id
+```
+
+Get specific device information.
+
+### Execute action
+
+```http
+POST /api/devices/:id/actions/:action
+```
+
+Execute device action from UI.
+
+### Get media events
+
+```http
+GET /api/devices/:id/events
+```
+
+List device media events.
+
+### Health check
+
+```http
+GET /api/health
+```
+
+Get service health status.
+
+## Authentication
+
+Panel uses PocketBase for authentication:
+
+### Login
+
+Users authenticate via PocketBase:
+
+```javascript
+const authData = await pb.collection('users').authWithPassword(
+  email,
+  password
+);
+```
+
+### Session management
+
+Sessions stored in PocketBase:
+
+- Automatic token refresh
+- Secure cookie storage
+- Session expiration
+
+### User roles
+
+Role-based access control:
+
+- **Admin** - Full system access
+- **Operator** - Device control and monitoring
+- **Viewer** - Read-only access
+
+## Real-time updates
+
+Panel uses various methods for real-time updates:
+
+### PocketBase realtime
+
+Subscribe to database changes:
+
+```javascript
+pb.collection('devices').subscribe('*', (e) => {
+  console.log('Device updated:', e.record);
+});
+```
+
+### WebSocket notifications
+
+Receive push notifications:
+
+```javascript
+const ws = new WebSocket('ws://joystick:8000/notifications');
+ws.onmessage = (event) => {
+  showNotification(JSON.parse(event.data));
+};
+```
+
+### Polling
+
+Periodic updates for telemetry:
+
+```javascript
+setInterval(async () => {
+  const status = await fetchDeviceStatus();
+  updateUI(status);
+}, 5000);
+```
+
+## UI customization
+
+### Themes
+
+Panel supports light and dark themes:
+
+- System theme detection
+- Manual theme toggle
+- Custom color schemes
+
+### Layout
+
+Customizable layout options:
+
+- Grid or list view
+- Sidebar position
+- Dashboard widgets
+
+### Preferences
+
+User preferences saved in PocketBase:
+
+- Default views
+- Notification settings
+- Display options
+
+## Integration with services
+
+### Joystick integration
+
+Execute actions via Joystick API:
+
+```javascript
+const response = await fetch(
+  'http://joystick:8000/api/run/device123/reboot',
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+);
+```
+
+### Studio integration
+
+Browse media from Studio:
+
+```javascript
+const events = await fetch(
+  'http://studio:8001/api/gallery/device123/events'
+);
+```
+
+### Switcher integration
+
+Control device modes:
+
+```javascript
+await fetch(
+  'http://switcher:8080/api/mode/device123/live',
+  { method: 'POST' }
+);
+```
+
+### Baker integration
+
+Manage scheduled actions:
+
+```javascript
+const schedules = await fetch(
+  'http://baker:3000/api/schedules'
+);
+```
+
+## Responsive design
+
+Panel is responsive across devices:
+
+- **Desktop** - Full feature set
+- **Tablet** - Optimized layout
+- **Mobile** - Touch-friendly interface
+
+## Accessibility
+
+Panel follows accessibility guidelines:
+
+- Keyboard navigation
+- Screen reader support
+- High contrast mode
+- Focus indicators
+
+## Performance optimization
+
+### Lazy loading
+
+Load components on demand:
+
+```javascript
+const DeviceDetails = lazy(() => import('./DeviceDetails'));
+```
+
+### Caching
+
+Cache API responses:
+
+```javascript
+const cache = new Map();
+const getCachedDevices = async () => {
+  if (cache.has('devices')) return cache.get('devices');
+  const devices = await fetchDevices();
+  cache.set('devices', devices);
+  return devices;
+};
+```
+
+### Debouncing
+
+Debounce user inputs:
+
+```javascript
+const debouncedSearch = debounce((query) => {
+  searchDevices(query);
+}, 300);
+```
+
+## Development mode
+
+Run Panel in development mode:
+
+```bash
+cd packages/panel
+bun run dev
+```
+
+Development features:
+
+- Hot module reload
+- Debug logging
+- Source maps
+- API mocking
+
+## Troubleshooting
+
+### Cannot connect to PocketBase
+
+- Verify `POCKETBASE_URL` is correct
+- Check network connectivity
+- Ensure PocketBase is healthy
+
+### Actions not executing
+
+- Check Joystick service is running
+- Verify authentication token
+- Review browser console for errors
+
+### Stream not loading
+
+- Verify MediaMTX is running
+- Check device is in live mode
+- Test stream URL directly
+
+### UI not updating
+
+- Check WebSocket connection
+- Verify realtime subscriptions
+- Review network tab for failed requests
+
+## Traefik routing
+
+Panel is exposed at `/panel` path:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.panel.rule=Host(${HOST}) && PathPrefix(`/panel`)"
+  - "traefik.http.middlewares.panel-strip.stripprefix.prefixes=/panel"
+  - "traefik.http.routers.panel.middlewares=panel-strip,cors"
+```
+
+Access Panel at:
+
+```
+http://localhost/panel
+```

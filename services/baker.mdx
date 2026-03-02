@@ -1,0 +1,340 @@
+---
+title: Baker service
+description: Scheduled actions and cron job management service
+---
+
+Baker is a scheduled action service that executes device actions on cron schedules, enabling automated device management and recurring tasks.
+
+## Overview
+
+Baker uses the cronbake library to manage scheduled actions, allowing you to automate device operations like reboots, cleanups, health checks, and custom scripts on flexible time schedules.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+baker:
+  image: ghcr.io/skylineagle/joystick/baker:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - PORT=3000
+    - STREAM_API_URL=http://host.docker.internal:9997
+    - POCKETBASE_URL=http://pocketbase:8090
+    - JOYSTICK_API_URL=http://joystick:8000
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `3000` |
+| `STREAM_API_URL` | MediaMTX API endpoint | Required |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+| `JOYSTICK_API_URL` | Joystick service URL | Required |
+
+## Dependencies
+
+Baker uses the following key dependencies:
+
+```json
+{
+  "@joystick/core": "workspace:*",
+  "cronbake": "^0.1.2",
+  "elysia": "^1.3.5",
+  "pocketbase": "^0.25.2",
+  "@elysiajs/cors": "^1.3.3",
+  "@elysiajs/swagger": "^1.3.0"
+}
+```
+
+## Features
+
+### Cron-based scheduling
+
+Schedule actions using standard cron expressions:
+
+- **Minute precision** - Run tasks at specific minutes
+- **Hourly schedules** - Execute tasks every hour or at specific hours
+- **Daily schedules** - Run tasks at specific times each day
+- **Weekly schedules** - Execute on specific days of the week
+- **Monthly schedules** - Run on specific dates
+
+### Action execution
+
+Baker executes actions via the Joystick API:
+
+- **Device actions** - Run any configured device action
+- **Parameter support** - Pass parameters to actions
+- **Error handling** - Log failures and retry logic
+- **Execution history** - Track scheduled action runs
+
+## Cron expression format
+
+Baker uses standard cron format:
+
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6) (Sunday to Saturday)
+│ │ │ │ │
+* * * * *
+```
+
+### Common examples
+
+```bash
+# Every minute
+* * * * *
+
+# Every hour at minute 0
+0 * * * *
+
+# Every day at 2:30 AM
+30 2 * * *
+
+# Every Monday at 9:00 AM
+0 9 * * 1
+
+# First day of every month at midnight
+0 0 1 * *
+
+# Every 15 minutes
+*/15 * * * *
+
+# Weekdays at 6:00 PM
+0 18 * * 1-5
+```
+
+## Use cases
+
+### Daily device reboot
+
+Reboot devices every day at 3 AM:
+
+```json
+{
+  "name": "Daily reboot",
+  "deviceId": "device123",
+  "actionName": "reboot",
+  "schedule": "0 3 * * *",
+  "enabled": true
+}
+```
+
+### Periodic cleanup
+
+Clean up old files every 6 hours:
+
+```json
+{
+  "name": "Cleanup old files",
+  "deviceId": "device123",
+  "actionName": "cleanup",
+  "schedule": "0 */6 * * *",
+  "enabled": true
+}
+```
+
+### Weekly health check
+
+Run comprehensive health check every Sunday:
+
+```json
+{
+  "name": "Weekly health check",
+  "deviceId": "device123",
+  "actionName": "health-check",
+  "schedule": "0 0 * * 0",
+  "enabled": true
+}
+```
+
+### Hourly status update
+
+Update device status every hour:
+
+```json
+{
+  "name": "Hourly status",
+  "deviceId": "device123",
+  "actionName": "update-status",
+  "schedule": "0 * * * *",
+  "enabled": true
+}
+```
+
+## Integration with Joystick
+
+Baker executes actions by making API calls to Joystick:
+
+```typescript
+const response = await fetch(
+  `${JOYSTICK_API_URL}/api/run/${deviceId}/${actionName}`,
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY
+    },
+    body: JSON.stringify(parameters)
+  }
+);
+```
+
+## PocketBase integration
+
+Baker is typically called by PocketBase hooks when specific events occur:
+
+```javascript
+// Example: Call baker when schedule created/updated
+const bakerUrl = process.env.BAKER_URL;
+await fetch(`${bakerUrl}/api/schedules/sync`, {
+  method: 'POST'
+});
+```
+
+## Logging and monitoring
+
+Baker provides logging for scheduled executions:
+
+```javascript
+logger.info({ deviceId, actionName, schedule }, 'Executing scheduled action');
+logger.error({ deviceId, actionName, error }, 'Scheduled action failed');
+```
+
+## Error handling
+
+Baker handles various error scenarios:
+
+- **Device offline** - Logs error, may retry based on configuration
+- **Action not found** - Logs error, disables schedule
+- **Invalid parameters** - Logs validation error
+- **Network errors** - Retries with backoff
+
+## API endpoints
+
+While Baker primarily works via PocketBase integration, it exposes endpoints for management:
+
+### Sync schedules
+
+```http
+POST /api/schedules/sync
+```
+
+Sync schedules from PocketBase.
+
+### List active schedules
+
+```http
+GET /api/schedules
+```
+
+Get all active schedules.
+
+### Trigger schedule manually
+
+```http
+POST /api/schedules/:id/trigger
+```
+
+Manually trigger a scheduled action.
+
+### Health check
+
+```http
+GET /api/health
+```
+
+Get service health status.
+
+## Best practices
+
+### Avoid overlapping executions
+
+Ensure actions complete before the next scheduled run:
+
+```json
+{
+  "schedule": "0 */6 * * *",
+  "comment": "Run every 6 hours to avoid overlap"
+}
+```
+
+### Use appropriate intervals
+
+Don't over-schedule resource-intensive tasks:
+
+```bash
+# Good: Hourly cleanup
+0 * * * *
+
+# Bad: Every minute cleanup (too frequent)
+* * * * *
+```
+
+### Consider timezone
+
+Baker uses the system timezone. Document your schedules:
+
+```json
+{
+  "schedule": "0 3 * * *",
+  "timezone": "UTC",
+  "comment": "Runs at 3 AM UTC"
+}
+```
+
+### Enable/disable schedules
+
+Use the enabled flag for temporary suspension:
+
+```json
+{
+  "enabled": false,
+  "comment": "Disabled during maintenance"
+}
+```
+
+## Troubleshooting
+
+### Schedule not executing
+
+- Verify cron expression is valid
+- Check `enabled` flag is true
+- Review Baker service logs
+- Ensure Joystick API is accessible
+
+### Actions failing
+
+- Verify device is online
+- Check action exists in PocketBase
+- Validate action parameters
+- Review Joystick service logs
+
+### Performance issues
+
+- Reduce schedule frequency
+- Stagger multiple device schedules
+- Monitor resource usage
+- Optimize action execution time
+
+## Traefik routing
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.baker.rule=Host(${HOST}) && PathPrefix(`/baker`)"
+  - "traefik.http.middlewares.baker-strip.stripprefix.prefixes=/baker"
+  - "traefik.http.routers.baker.middlewares=baker-strip,cors"
+```

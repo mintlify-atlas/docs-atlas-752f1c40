@@ -1,0 +1,416 @@
+---
+title: Whisper service
+description: SMS gateway service for device communication
+---
+
+Whisper is an SMS gateway service that enables sending SMS messages to devices using the Android SMS Gateway integration.
+
+## Overview
+
+Whisper provides an HTTP API for sending SMS messages to devices, useful for remote device control, alerts, and out-of-band communication when network connectivity is limited.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+whisper:
+  image: ghcr.io/skylineagle/joystick/whisper:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - STREAM_API_URL=http://host.docker.internal:9997
+    - POCKETBASE_URL=http://pocketbase:8090
+    - JOYSTICK_API_URL=http://joystick:8000
+    - PORT=8081
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8081` |
+| `STREAM_API_URL` | MediaMTX API endpoint | Required |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+| `JOYSTICK_API_URL` | Joystick service URL | Required |
+
+## Dependencies
+
+Whisper uses Android SMS Gateway integration:
+
+```json
+{
+  "@joystick/core": "workspace:*",
+  "android-sms-gateway": "^2.0.0",
+  "elysia": "^1.3.5",
+  "pocketbase": "^0.25.2",
+  "@elysiajs/cors": "^1.3.3",
+  "@elysiajs/swagger": "^1.3.0"
+}
+```
+
+## Features
+
+### SMS sending
+
+- **Send to phone numbers** - Direct SMS to any phone number
+- **Device targeting** - Send to device phone numbers from database
+- **Message templates** - Support for templated messages
+- **Delivery tracking** - Track message delivery status
+
+### Android SMS Gateway integration
+
+Whisper integrates with Android SMS Gateway app:
+
+- **Gateway authentication** - Secure API access
+- **Multiple gateways** - Support for multiple SMS gateway devices
+- **Fallback support** - Switch between gateways on failure
+- **Status monitoring** - Monitor gateway health and message queue
+
+## Use cases
+
+### Remote device control
+
+Send SMS commands to devices without network connectivity:
+
+```json
+{
+  "phoneNumber": "+1234567890",
+  "message": "REBOOT"
+}
+```
+
+### Alert notifications
+
+Send critical alerts via SMS:
+
+```json
+{
+  "deviceId": "device123",
+  "message": "CRITICAL: Battery low 5%"
+}
+```
+
+### Out-of-band management
+
+Control devices when primary network is down:
+
+```json
+{
+  "phoneNumber": "+1234567890",
+  "message": "SWITCH_NETWORK"
+}
+```
+
+### Status requests
+
+Request device status via SMS:
+
+```json
+{
+  "deviceId": "device123",
+  "message": "STATUS"
+}
+```
+
+## API endpoints
+
+### Send SMS
+
+```http
+POST /api/sms/send
+```
+
+Send SMS message to phone number or device.
+
+**Request body:**
+```json
+{
+  "phoneNumber": "+1234567890",
+  "message": "Your message here"
+}
+```
+
+Or with device ID:
+
+```json
+{
+  "deviceId": "device123",
+  "message": "Your message here"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "messageId": "msg_123456",
+  "status": "sent"
+}
+```
+
+### Get message status
+
+```http
+GET /api/sms/status/:messageId
+```
+
+Get delivery status of sent message.
+
+**Response:**
+```json
+{
+  "messageId": "msg_123456",
+  "status": "delivered",
+  "timestamp": "2024-03-20T10:00:00Z"
+}
+```
+
+### List sent messages
+
+```http
+GET /api/sms/messages
+```
+
+List recent sent messages.
+
+**Query parameters:**
+- `deviceId` - Filter by device
+- `status` - Filter by status
+- `limit` - Number of messages to return
+
+### Health check
+
+```http
+GET /api/health
+```
+
+Get service and gateway health status.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "service": "whisper",
+  "gateway": {
+    "status": "connected",
+    "queueSize": 0
+  }
+}
+```
+
+## Android SMS Gateway setup
+
+### Install gateway app
+
+1. Install Android SMS Gateway app on Android device
+2. Configure gateway credentials
+3. Enable SMS permissions
+4. Start gateway service
+
+### Configure Whisper
+
+Set gateway credentials in PocketBase or environment:
+
+```bash
+SMS_GATEWAY_URL=https://your-gateway.com
+SMS_GATEWAY_TOKEN=your-token
+```
+
+### Test connection
+
+```bash
+curl http://localhost:8081/api/health
+```
+
+## Message templates
+
+Support for message templating:
+
+```json
+{
+  "template": "Device {{deviceName}} battery at {{batteryLevel}}%",
+  "variables": {
+    "deviceName": "Camera 1",
+    "batteryLevel": "15"
+  }
+}
+```
+
+## Integration examples
+
+### Integration with Baker
+
+Schedule SMS alerts:
+
+```json
+{
+  "schedule": "0 9 * * *",
+  "action": "send-sms",
+  "parameters": {
+    "message": "Daily status report"
+  }
+}
+```
+
+### Integration with Studio
+
+Send SMS when media event occurs:
+
+```json
+{
+  "hook": "after_event_processed",
+  "action": "send-sms",
+  "message": "New media captured"
+}
+```
+
+### Integration with Switcher
+
+SMS notification on slot switch:
+
+```json
+{
+  "event": "slot_switched",
+  "action": "send-sms",
+  "message": "Device switched to secondary slot"
+}
+```
+
+## Message status codes
+
+- `queued` - Message queued for sending
+- `sent` - Message sent to gateway
+- `delivered` - Message delivered to recipient
+- `failed` - Delivery failed
+- `pending` - Delivery pending
+
+## Rate limiting
+
+Whisper implements rate limiting to prevent abuse:
+
+- **Per device** - Limit messages per device per hour
+- **Global** - Overall message throughput limit
+- **Gateway** - Respect gateway provider limits
+
+## Error handling
+
+Common error scenarios:
+
+### Gateway offline
+
+```json
+{
+  "success": false,
+  "error": "SMS gateway unavailable"
+}
+```
+
+### Invalid phone number
+
+```json
+{
+  "success": false,
+  "error": "Invalid phone number format"
+}
+```
+
+### Rate limit exceeded
+
+```json
+{
+  "success": false,
+  "error": "Rate limit exceeded, try again later"
+}
+```
+
+## Best practices
+
+### Keep messages concise
+
+SMS has character limits:
+
+```javascript
+// Good: Short command
+"REBOOT"
+
+// Bad: Too verbose
+"Please reboot the device at your earliest convenience"
+```
+
+### Use message templates
+
+Standardize message formats:
+
+```javascript
+const templates = {
+  alert: "ALERT: {{message}}",
+  command: "CMD: {{command}}",
+  status: "STATUS: {{status}}"
+};
+```
+
+### Handle failures gracefully
+
+Implement retry logic:
+
+```javascript
+for (let i = 0; i < 3; i++) {
+  try {
+    await sendSMS(message);
+    break;
+  } catch (error) {
+    if (i === 2) throw error;
+    await delay(1000 * (i + 1));
+  }
+}
+```
+
+### Monitor gateway health
+
+Regularly check gateway status:
+
+```bash
+# Cron job to check gateway
+*/5 * * * * curl http://localhost:8081/api/health
+```
+
+## Troubleshooting
+
+### Messages not sending
+
+- Verify gateway is connected
+- Check phone number format
+- Review gateway logs
+- Verify SMS permissions on gateway device
+
+### Delivery failures
+
+- Check recipient phone number is valid
+- Verify gateway has cellular signal
+- Check gateway message queue
+- Review error logs
+
+### Performance issues
+
+- Check gateway queue size
+- Monitor rate limits
+- Review message volume
+- Consider multiple gateways
+
+## Traefik routing
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.whisper.rule=Host(${HOST}) && PathPrefix(`/whisper`)"
+  - "traefik.http.middlewares.whisper-strip.stripprefix.prefixes=/whisper"
+  - "traefik.http.routers.whisper.middlewares=whisper-strip,cors"
+```

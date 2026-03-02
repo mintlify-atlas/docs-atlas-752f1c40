@@ -1,0 +1,294 @@
+---
+title: Docker Compose
+description: Docker Compose setup and management for Joystick IoT platform
+---
+
+## Docker Compose files
+
+Joystick IoT platform provides three Docker Compose configurations for different deployment scenarios:
+
+- `docker-compose.yml` - Production deployment with Traefik reverse proxy
+- `docker-compose.linux.yml` - Linux-optimized deployment with host networking
+- `docker-compose.dev.yml` - Development environment with exposed ports and mounted volumes
+
+## Production deployment
+
+### Architecture
+
+The production deployment uses Traefik as a reverse proxy to route requests to different services:
+
+```yaml
+services:
+  traefik:
+    image: traefik:v2.11
+    ports:
+      - "80:80"
+      - "8080:8080"
+    command:
+      - "--providers.docker"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+      - "--api.insecure=true"
+```
+
+### Service routing
+
+Services are exposed through Traefik using labels:
+
+| Service | URL Path | Internal Port |
+|---------|----------|---------------|
+| App | `/` | 80 |
+| Joystick API | `/joystick` | 8000 |
+| Panel | `/panel` | 4000 |
+| Baker | `/baker` | 3000 |
+| Switcher | `/switcher` | 8080 |
+| Whisper | `/whisper` | 8081 |
+| Studio | `/studio` | 8001 |
+
+### Starting services
+
+```bash
+docker-compose up -d
+```
+
+### Stopping services
+
+```bash
+docker-compose down
+```
+
+### Viewing logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f joystick
+```
+
+## Linux deployment
+
+### When to use
+
+Use `docker-compose.linux.yml` when:
+- Deploying on Linux servers
+- You need maximum network performance
+- You want to avoid Docker network overhead
+
+### Host networking
+
+All services use `network_mode: host`, which means:
+- Services bind directly to host ports
+- No Docker network bridge overhead
+- Better performance for video streaming
+- Services use host IP addresses
+
+### Starting services
+
+```bash
+docker-compose -f docker-compose.linux.yml up -d
+```
+
+### Service configuration example
+
+```yaml
+services:
+  pocketbase:
+    image: ghcr.io/skylineagle/joystick/pb:latest
+    network_mode: "host"
+    restart: unless-stopped
+    environment:
+      - BAKER_URL=http://baker:3000
+      - MEDIAMTX_API=http://mediamtx:9997
+    volumes:
+      - pb_data:/pb_data
+```
+
+## Development deployment
+
+### When to use
+
+Use `docker-compose.dev.yml` when:
+- Developing locally
+- You need to modify PocketBase hooks or migrations
+- You want direct access to services without a reverse proxy
+
+### Exposed ports
+
+```yaml
+services:
+  pocketbase:
+    ports:
+      - "8090:8090"
+  
+  mediamtx:
+    ports:
+      - "9997:9997"  # API
+      - "8554:8554"  # RTSP
+      - "8888:8888"  # HLS
+      - "1935:1935"  # RTMP
+```
+
+### Mounted volumes
+
+Development mode mounts local directories for live code changes:
+
+```yaml
+volumes:
+  - ./pocketbase/pb_data:/pb_data
+  - ./pocketbase/pb_public:/pb_public
+  - ./pocketbase/pb_hooks:/pb_hooks
+  - ./pocketbase/pb_migrations:/pb_migrations
+```
+
+### Starting services
+
+```bash
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+## Service management
+
+### Restart a service
+
+```bash
+docker-compose restart joystick
+```
+
+### Rebuild and restart
+
+```bash
+docker-compose up -d --build joystick
+```
+
+### View service status
+
+```bash
+docker-compose ps
+```
+
+### Execute commands in a container
+
+```bash
+docker-compose exec joystick sh
+```
+
+### View resource usage
+
+```bash
+docker stats
+```
+
+## Common Docker Compose patterns
+
+### Health checks
+
+PocketBase includes a health check to ensure it's ready before dependent services start:
+
+```yaml
+healthcheck:
+  test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+  interval: 5s
+  timeout: 5s
+  retries: 5
+```
+
+Dependent services wait for PocketBase to be healthy:
+
+```yaml
+depends_on:
+  pocketbase:
+    condition: service_healthy
+  mediamtx:
+    condition: service_started
+```
+
+### Restart policies
+
+All services use `restart: unless-stopped`:
+
+```yaml
+restart: unless-stopped
+```
+
+This ensures services automatically restart after crashes or system reboots, unless manually stopped.
+
+### Shared configuration
+
+Docker Compose anchors reduce duplication:
+
+```yaml
+x-platform-restart: &default-platform-restart
+  platform: linux/amd64
+  restart: unless-stopped
+
+services:
+  joystick:
+    <<: *default-platform-restart
+    # other configuration...
+```
+
+### CORS configuration
+
+CORS headers are configured via Traefik middleware:
+
+```yaml
+labels:
+  - "traefik.http.middlewares.cors.headers.accesscontrolallowmethods=*"
+  - "traefik.http.middlewares.cors.headers.accesscontrolallowheaders=*"
+  - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=*"
+  - "traefik.http.middlewares.cors.headers.addvaryheader=true"
+```
+
+## Updating services
+
+### Update all services
+
+```bash
+docker-compose pull
+docker-compose up -d
+```
+
+### Update specific service
+
+```bash
+docker-compose pull joystick
+docker-compose up -d joystick
+```
+
+## Backup and restore
+
+### Backup PocketBase data
+
+```bash
+docker run --rm -v joystick_pb_data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/pb_data_backup.tar.gz /data
+```
+
+### Restore PocketBase data
+
+```bash
+docker run --rm -v joystick_pb_data:/data -v $(pwd):/backup \
+  alpine tar xzf /backup/pb_data_backup.tar.gz -C /
+```
+
+## Cleanup
+
+### Remove stopped containers
+
+```bash
+docker-compose down
+```
+
+### Remove containers and volumes
+
+```bash
+docker-compose down -v
+```
+
+### Remove unused images
+
+```bash
+docker image prune -a
+```

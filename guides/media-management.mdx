@@ -1,0 +1,420 @@
+---
+title: Media management
+description: Use the Studio service to manage media files from IoT devices
+---
+
+The Studio service provides flexible media management capabilities for images, videos, audio, and other file types from your IoT devices.
+
+## Overview
+
+Studio supports multiple methods for publishing and managing media events:
+
+- **File-based upload**: Simple directory-based file drop system
+- **Harvesting**: Automatic polling of device events
+- **Direct upload**: HTTP POST endpoint for file uploads
+- **URL-based upload**: Pre-signed URLs for secure uploads
+- **Hook system**: Event-driven automation
+
+## Directory structure
+
+Studio automatically creates a directory structure for each device:
+
+```
+data/gallery/
+  ├── device1/
+  │   ├── incoming/     # Drop new files here
+  │   ├── processed/    # Successfully processed files
+  │   └── thumbnails/   # Optional thumbnail files
+  └── device2/
+      ├── incoming/
+      ├── processed/
+      └── thumbnails/
+```
+
+## File-based upload
+
+The simplest way to publish media events is by copying files to the device's incoming directory.
+
+<Steps>
+  <Step title="Get device paths">
+    Query the Studio API to get the device-specific upload paths:
+    ```bash
+    curl http://localhost:8001/api/gallery/device123/paths
+    ```
+
+    Response:
+    ```json
+    {
+      "success": true,
+      "paths": {
+        "incoming": "/path/to/data/gallery/device123/incoming",
+        "thumbnails": "/path/to/data/gallery/device123/thumbnails"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Copy event files">
+    Copy your media files to the incoming directory:
+    ```bash
+    cp capture.jpg /path/to/data/gallery/device123/incoming/
+    ```
+  </Step>
+
+  <Step title="Add thumbnails (optional)">
+    If you have thumbnails, copy them with the same filename as the event file:
+    ```bash
+    cp thumb.jpg /path/to/data/gallery/device123/thumbnails/capture.jpg
+    ```
+
+    <Tip>
+      Thumbnail files must have the same name as the corresponding event file for automatic association.
+    </Tip>
+  </Step>
+
+  <Step title="Automatic processing">
+    The Studio service will automatically:
+    1. Detect new files in the incoming directory
+    2. Create gallery records with metadata
+    3. Move processed files to the processed directory
+    4. Associate thumbnails if present
+    5. Trigger configured hooks
+  </Step>
+</Steps>
+
+### Automated upload script
+
+Create a script to automate file uploads:
+
+```bash
+#!/bin/bash
+EVENT_FILE=$1
+THUMB_FILE=$2
+DEVICE_ID="device123"
+
+# Get device paths
+PATHS=$(curl -s "http://localhost:8001/api/gallery/$DEVICE_ID/paths")
+INCOMING_PATH=$(echo $PATHS | jq -r '.paths.incoming')
+THUMB_PATH=$(echo $PATHS | jq -r '.paths.thumbnails')
+
+# Copy event file
+cp "$EVENT_FILE" "$INCOMING_PATH/"
+
+# Copy thumbnail if provided
+if [ -n "$THUMB_FILE" ]; then
+  EVENT_NAME=$(basename "$EVENT_FILE")
+  THUMB_NAME="${EVENT_NAME%.*}.jpg"
+  cp "$THUMB_FILE" "$THUMB_PATH/$THUMB_NAME"
+fi
+
+echo "Upload complete for $EVENT_FILE"
+```
+
+## Direct HTTP upload
+
+Upload media files directly via HTTP POST:
+
+```bash
+# Upload image with metadata
+curl -X POST "http://localhost:8001/api/gallery/device123/upload" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "name=capture.jpg" \
+  -F "event=@/path/to/capture.jpg" \
+  -F "media_type=image" \
+  -F "metadata={\"timestamp\":\"2026-03-02T10:00:00Z\"}"
+
+# Upload video with thumbnail
+curl -X POST "http://localhost:8001/api/gallery/device123/upload" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "name=video.mp4" \
+  -F "event=@/path/to/video.mp4" \
+  -F "thumbnail=@/path/to/thumb.jpg" \
+  -F "has_thumbnail=true" \
+  -F "media_type=video"
+```
+
+## Pre-signed URL upload
+
+For secure uploads from untrusted clients, use pre-signed URLs:
+
+<Steps>
+  <Step title="Request upload URLs">
+    ```bash
+    curl "http://localhost:8001/api/gallery/device123/upload-url?filename=event.mp4&thumbnail=true" \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+
+    Response:
+    ```json
+    {
+      "success": true,
+      "upload_url": "https://...",
+      "thumbnail_upload_url": "https://..."
+    }
+    ```
+  </Step>
+
+  <Step title="Upload to pre-signed URLs">
+    ```bash
+    # Upload event file
+    curl -X PUT "$UPLOAD_URL" --upload-file /path/to/event.mp4
+
+    # Upload thumbnail
+    curl -X PUT "$THUMBNAIL_UPLOAD_URL" --upload-file /path/to/thumb.jpg
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Pre-signed URLs expire after a limited time. Upload your files promptly after receiving the URLs.
+</Warning>
+
+## Hook system
+
+Hooks allow you to execute device actions automatically when specific events occur.
+
+### Available hook events
+
+Studio supports 7 hook event types:
+
+1. `after_event_pulled` - After an event is successfully pulled from device
+2. `after_all_events_pulled` - After all events in a batch are processed
+3. `after_event_processed` - After an event is processed and stored
+4. `after_thumbnail_generated` - After a thumbnail is generated
+5. `on_file_detected` - When a new file is detected in incoming directory
+6. `on_error` - When an error occurs during processing
+7. `on_service_start` - When the media service starts for a device
+
+### Creating hooks
+
+<Steps>
+  <Step title="Create a hook">
+    ```bash
+    curl -X POST "http://localhost:8001/api/hooks" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -d '{
+        "event_type": "after_event_processed",
+        "device_id": "device123",
+        "action_id": "notify-on-event",
+        "enabled": true
+      }'
+    ```
+  </Step>
+
+  <Step title="Define the action">
+    Create the corresponding device action in PocketBase:
+    ```json
+    {
+      "name": "notify-on-event",
+      "device": "device123",
+      "command": "curl -X POST https://api.slack.com/webhook -d '{\"text\":\"New event: {{event_name}}\"}"
+    }
+    ```
+  </Step>
+
+  <Step title="Test the hook">
+    Upload a file and verify the hook executes:
+    ```bash
+    cp test.jpg /path/to/data/gallery/device123/incoming/
+    ```
+  </Step>
+</Steps>
+
+### Hook parameter injection
+
+Hooks support automatic parameter injection in action commands:
+
+```bash
+# Process event with ffmpeg
+ffmpeg -i {{file_path}} -vf scale=640:480 /processed/{{event_name}}
+
+# Archive event to cloud storage
+aws s3 cp {{file_path}} s3://bucket/{{device_id}}/{{date}}/{{event_name}}
+
+# Generate custom thumbnail
+ffmpeg -i {{file_path}} -vf scale=320:240 -frames:v 1 /thumbs/{{event_name}}.jpg
+```
+
+Available parameters:
+- `{{device_id}}` - Current device ID
+- `{{event_name}}` - Event filename
+- `{{media_type}}` - Media type (image, video, audio)
+- `{{file_path}}` - Full file path
+- `{{timestamp}}` - Current timestamp
+- `{{date}}` - Current date (YYYY-MM-DD)
+
+### Managing hooks
+
+```bash
+# List all hooks
+curl http://localhost:8001/api/hooks
+
+# List hooks for specific device
+curl "http://localhost:8001/api/hooks?device=device123"
+
+# Get hooks by event type
+curl http://localhost:8001/api/hooks/events/after_event_processed
+
+# Update hook
+curl -X PATCH "http://localhost:8001/api/hooks/HOOK_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+
+# Delete hook
+curl -X DELETE "http://localhost:8001/api/hooks/HOOK_ID"
+```
+
+## File watcher management
+
+Studio automatically manages file watchers to monitor incoming directories.
+
+### Automatic management
+
+- File watchers are created for all devices on service startup
+- Watchers sync with device list every 5 minutes
+- Orphaned watchers are automatically cleaned up
+- Failed watchers are automatically restarted
+
+### Manual management
+
+```bash
+# Check all watcher statuses
+curl http://localhost:8001/api/watchers
+
+# Add watcher for new device
+curl -X POST http://localhost:8001/api/watchers/device123/add
+
+# Remove watcher
+curl -X DELETE http://localhost:8001/api/watchers/device123
+
+# Sync watchers with device list
+curl -X POST http://localhost:8001/api/watchers/sync
+
+# Check specific device watcher
+curl http://localhost:8001/api/watchers/device123/status
+
+# Refresh all watchers
+curl -X POST http://localhost:8001/api/watchers/refresh
+
+# Clean up orphaned watchers
+curl -X POST http://localhost:8001/api/watchers/cleanup-orphaned
+```
+
+<Tip>
+  If you add or remove devices frequently, use the sync endpoint to ensure watchers are up to date without restarting the service.
+</Tip>
+
+## Media types and classification
+
+Studio automatically classifies media based on file extensions:
+
+- **Image**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`
+- **Video**: `.mp4`, `.avi`, `.mov`, `.mkv`, `.webm`
+- **Audio**: `.mp3`, `.wav`, `.ogg`, `.flac`, `.aac`
+- **Document**: `.pdf`, `.doc`, `.docx`, `.txt`
+- **Other**: Any other file type
+
+### Query by media type
+
+```bash
+# Get all images
+curl "http://localhost:8001/api/gallery/device123/events?media_type=image"
+
+# Get all videos
+curl "http://localhost:8001/api/gallery/device123/events?media_type=video"
+
+# Get statistics by type
+curl http://localhost:8001/api/gallery/device123/stats
+```
+
+## Device actions for media
+
+Configure device actions to list, retrieve, and remove media files.
+
+### List events action
+
+```bash
+# Create list-events action
+curl -X POST "http://localhost:8090/api/collections/actions/records" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "list-events",
+    "device": "device123",
+    "command": "ls -la /events"
+  }'
+```
+
+### Remove event action
+
+```bash
+# Create remove-event action with parameter
+curl -X POST "http://localhost:8090/api/collections/actions/records" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "remove-event",
+    "device": "device123",
+    "command": "rm -f /events/{{event_name}}"
+  }'
+```
+
+### Bulk cleanup action
+
+```bash
+# Remove events older than 30 days
+curl -X POST "http://localhost:8090/api/collections/actions/records" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "cleanup-old-events",
+    "device": "device123",
+    "command": "find /events -type f -mtime +30 -delete"
+  }'
+```
+
+<Warning>
+  Always test removal commands carefully to avoid accidentally deleting important files. Consider implementing backup procedures before bulk deletions.
+</Warning>
+
+## Troubleshooting
+
+### Files not being detected
+
+1. Check watcher status:
+   ```bash
+   curl http://localhost:8001/api/watchers/device123/status
+   ```
+
+2. Verify file permissions on incoming directory
+
+3. Check Studio service logs:
+   ```bash
+   docker logs studio
+   ```
+
+4. Manually refresh watchers:
+   ```bash
+   curl -X POST http://localhost:8001/api/watchers/refresh
+   ```
+
+### Hooks not executing
+
+1. Verify hook is enabled:
+   ```bash
+   curl http://localhost:8001/api/hooks
+   ```
+
+2. Check that the associated action exists and is valid
+
+3. Verify the event type matches the trigger condition
+
+4. Check Studio logs for hook execution errors
+
+### Thumbnails not associating
+
+1. Ensure thumbnail filename exactly matches event filename
+
+2. Verify thumbnail is placed in the correct thumbnails directory
+
+3. Check that `has_thumbnail` flag is set when using direct upload
+
+4. Verify file permissions allow Studio to read the thumbnail

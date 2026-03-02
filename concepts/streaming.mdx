@@ -1,0 +1,514 @@
+---
+title: Video streaming
+description: Configure RTSP, WebRTC, and HLS video streams using MediaMTX integration
+---
+
+## Overview
+
+Joystick uses [MediaMTX](https://github.com/bluenviron/mediamtx) as its streaming server, providing support for multiple protocols including RTSP, RTMP, HLS, WebRTC, and SRT. MediaMTX runs as a core service in the platform's Docker stack.
+
+## MediaMTX service
+
+MediaMTX is deployed using the official Docker image:
+
+```yaml docker-compose.yml
+mediamtx:
+  image: bluenviron/mediamtx:1.11.2
+  network_mode: host
+  restart: unless-stopped
+  volumes:
+    - ./mediamtx/mediamtx.yml:/mediamtx.yml
+```
+
+<Info>
+  MediaMTX runs in `host` network mode to avoid port mapping complexity for UDP-based protocols like RTP and WebRTC.
+</Info>
+
+## Configuration
+
+MediaMTX is configured via `mediamtx.yml`. Here are the key settings:
+
+### Control API
+
+The API enables programmatic stream management:
+
+```yaml mediamtx/mediamtx.yml
+api: yes
+apiAddress: :9997
+apiAllowOrigin: "*"
+```
+
+<ParamField path="api" type="boolean" default="yes">
+  Enables the REST API for stream control
+</ParamField>
+
+<ParamField path="apiAddress" type="string" default=":9997">
+  API server listen address
+</ParamField>
+
+<ParamField path="apiAllowOrigin" type="string" default="*">
+  CORS header for cross-origin requests
+</ParamField>
+
+### Streaming protocols
+
+MediaMTX supports multiple protocols simultaneously:
+
+<Accordion title="Protocol configuration">
+  <Tabs>
+    <Tab title="RTSP">
+      Real-Time Streaming Protocol for device sources:
+
+      ```yaml
+      rtsp: yes
+      rtspAddress: :8554
+      rtspTransports: [udp, multicast, tcp]
+      rtspEncryption: "no"
+      rtpAddress: :8000
+      rtcpAddress: :8001
+      ```
+
+      <ParamField path="rtspTransports" type="array">
+        Supported transports: `udp`, `multicast`, `tcp`
+      </ParamField>
+    </Tab>
+
+    <Tab title="WebRTC">
+      Low-latency browser streaming:
+
+      ```yaml
+      webrtc: yes
+      webrtcAddress: :8889
+      webrtcEncryption: no
+      webrtcAllowOrigin: "*"
+      webrtcLocalUDPAddress: :8189
+      webrtcIPsFromInterfaces: yes
+      ```
+
+      <Note>
+        WebRTC provides the lowest latency for browser-based streaming, ideal for real-time monitoring.
+      </Note>
+    </Tab>
+
+    <Tab title="HLS">
+      HTTP Live Streaming for broad compatibility:
+
+      ```yaml
+      hls: yes
+      hlsAddress: :8888
+      hlsAllowOrigin: "*"
+      hlsVariant: lowLatency
+      hlsSegmentCount: 7
+      hlsSegmentDuration: 1s
+      hlsPartDuration: 200ms
+      ```
+
+      <ParamField path="hlsVariant" type="enum">
+        Options: `mpegts`, `fmp4`, `lowLatency`
+      </ParamField>
+    </Tab>
+
+    <Tab title="RTMP">
+      Real-Time Messaging Protocol:
+
+      ```yaml
+      rtmp: yes
+      rtmpAddress: :1935
+      rtmpEncryption: "no"
+      ```
+    </Tab>
+
+    <Tab title="SRT">
+      Secure Reliable Transport:
+
+      ```yaml
+      srt: yes
+      srtAddress: :8890
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+## Stream paths
+
+Streams are organized by path, which acts as a unique identifier:
+
+```
+rtsp://server:8554/device_id
+http://server:8888/device_id/index.m3u8
+http://server:8889/device_id/whep
+```
+
+### Path configuration
+
+Default settings apply to all paths unless overridden:
+
+```yaml mediamtx/mediamtx.yml
+pathDefaults:
+  source: publisher
+  sourceOnDemand: no
+  maxReaders: 0
+  overridePublisher: yes
+  record: no
+```
+
+<Accordion title="Path settings">
+  <ParamField path="source" type="string" default="publisher">
+    Stream source. Can be:
+    - `publisher` - Client publishes to this path
+    - `rtsp://url` - Pull from RTSP camera
+    - `rtmp://url` - Pull from RTMP source
+    - `http://url/stream.m3u8` - Pull from HLS source
+    - `redirect` - Redirect to another path
+  </ParamField>
+
+  <ParamField path="sourceOnDemand" type="boolean" default="no">
+    Only pull source when readers connect (saves bandwidth)
+  </ParamField>
+
+  <ParamField path="maxReaders" type="number" default="0">
+    Maximum concurrent readers (0 = unlimited)
+  </ParamField>
+
+  <ParamField path="overridePublisher" type="boolean" default="yes">
+    Allow new publisher to disconnect existing publisher
+  </ParamField>
+</Accordion>
+
+### Custom path example
+
+```yaml
+paths:
+  camera_01:
+    source: rtsp://192.168.1.100:554/stream
+    sourceOnDemand: yes
+    sourceOnDemandCloseAfter: 10s
+```
+
+## Authentication
+
+MediaMTX supports multiple authentication methods:
+
+### Internal authentication
+
+Defined in the configuration file:
+
+```yaml mediamtx/mediamtx.yml
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    permissions:
+      - action: api
+      - action: publish
+      - action: read
+      - action: playback
+```
+
+### HTTP authentication
+
+External authentication via HTTP callback:
+
+```yaml
+authMethod: http
+authHTTPAddress: http://pocketbase:8090/api/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+```
+
+The auth endpoint receives:
+```json
+{
+  "user": "username",
+  "password": "password",
+  "ip": "client_ip",
+  "action": "publish|read|playback|api",
+  "path": "device_id",
+  "protocol": "rtsp|rtmp|hls|webrtc|srt"
+}
+```
+
+### JWT authentication
+
+Token-based authentication:
+
+```yaml
+authMethod: jwt
+authJWTJWKS: https://auth-server/.well-known/jwks.json
+authJWTClaimKey: mediamtx_permissions
+```
+
+JWT must include permissions:
+```json
+{
+  "mediamtx_permissions": [
+    {
+      "action": "publish",
+      "path": "device_id"
+    },
+    {
+      "action": "read",
+      "path": "device_id"
+    }
+  ]
+}
+```
+
+## Recording
+
+MediaMTX can record streams to disk:
+
+```yaml
+record: yes
+recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+recordFormat: fmp4
+recordPartDuration: 1s
+recordSegmentDuration: 1h
+recordDeleteAfter: 1d
+```
+
+<CodeGroup>
+```yaml Format options
+recordFormat: fmp4  # Fragmented MP4 (recommended)
+recordFormat: mpegts  # MPEG-TS
+```
+
+```yaml Path variables
+%path - Stream path name
+%Y %m %d - Date (year, month, day)
+%H %M %S - Time (hour, minute, second)
+%f - Fractional seconds
+```
+</CodeGroup>
+
+<Warning>
+  Set `recordDeleteAfter` to prevent disk exhaustion. Recordings older than this duration are automatically deleted.
+</Warning>
+
+## API integration
+
+Joystick services interact with MediaMTX via its REST API:
+
+### Environment configuration
+
+```yaml docker-compose.yml
+joystick:
+  environment:
+    - STREAM_API_URL=http://host.docker.internal:9997
+
+baker:
+  environment:
+    - STREAM_API_URL=http://host.docker.internal:9997
+```
+
+### API endpoints
+
+<Tabs>
+  <Tab title="List paths">
+    ```bash
+    curl http://localhost:9997/v3/paths/list
+    ```
+
+    Response:
+    ```json
+    {
+      "items": [
+        {
+          "name": "device_01",
+          "source": "publisher",
+          "ready": true,
+          "readers": 2
+        }
+      ]
+    }
+    ```
+  </Tab>
+
+  <Tab title="Add path">
+    ```bash
+    curl -X POST http://localhost:9997/v3/config/paths/add/device_01 \
+      -H "Content-Type: application/json" \
+      -d '{
+        "source": "rtsp://192.168.1.100:554/stream",
+        "sourceOnDemand": true
+      }'
+    ```
+  </Tab>
+
+  <Tab title="Remove path">
+    ```bash
+    curl -X POST http://localhost:9997/v3/config/paths/remove/device_01
+    ```
+  </Tab>
+
+  <Tab title="Get path info">
+    ```bash
+    curl http://localhost:9997/v3/paths/get/device_01
+    ```
+
+    Response:
+    ```json
+    {
+      "name": "device_01",
+      "source": "rtsp://192.168.1.100:554/stream",
+      "ready": true,
+      "readers": 1,
+      "bytesReceived": 1234567
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Action integration
+
+Actions can configure streams using the `$mediamtx` parameter:
+
+```json
+{
+  "action": "start-stream",
+  "command": "curl -X POST $mediamtx/v3/config/paths/add/$device -d '{\"source\": \"rtsp://$host:554/stream\"}'",
+  "target": "local"
+}
+```
+
+See [Actions](/concepts/actions#parameter-examples) for more details.
+
+## Device streaming
+
+Devices typically publish streams to MediaMTX via RTSP:
+
+### Publishing from device
+
+```bash
+# Using ffmpeg
+ffmpeg -i /dev/video0 \
+  -f rtsp \
+  -rtsp_transport tcp \
+  rtsp://mediamtx:8554/device_id
+
+# Using GStreamer
+gst-launch-1.0 v4l2src device=/dev/video0 ! \
+  x264enc ! rtspclientsink location=rtsp://mediamtx:8554/device_id
+```
+
+### Playback URLs
+
+Once published, streams are accessible via multiple protocols:
+
+<CodeGroup>
+```bash RTSP
+rtsp://server:8554/device_id
+```
+
+```bash HLS
+http://server:8888/device_id/index.m3u8
+```
+
+```bash WebRTC (WHEP)
+http://server:8889/device_id/whep
+```
+
+```bash RTMP
+rtmp://server:1935/device_id
+```
+</CodeGroup>
+
+## Stream quality presets
+
+Device models can define quality presets:
+
+```typescript packages/core/src/types/index.ts
+export type ModelStreamQuality = {
+  [key: string]: {
+    excellent: number;
+    good: number;
+    fair: number;
+    poor: number;
+  };
+};
+```
+
+Example configuration:
+```json
+{
+  "bitrate_presets": {
+    "low": 500000,
+    "medium": 1500000,
+    "high": 3000000,
+    "ultra": 6000000
+  },
+  "fps_presets": {
+    "low": 15,
+    "medium": 24,
+    "high": 30,
+    "ultra": 60
+  },
+  "quality_presets": {
+    "low": { "bitrate": 500000, "fps": 15 },
+    "medium": { "bitrate": 1500000, "fps": 24 },
+    "high": { "bitrate": 3000000, "fps": 30 },
+    "ultra": { "bitrate": 6000000, "fps": 60 }
+  }
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Stream not appearing">
+    1. Check MediaMTX logs:
+       ```bash
+       docker logs mediamtx
+       ```
+    2. Verify path is registered:
+       ```bash
+       curl http://localhost:9997/v3/paths/list
+       ```
+    3. Test publisher connection:
+       ```bash
+       ffmpeg -re -i test.mp4 -f rtsp rtsp://localhost:8554/test
+       ```
+  </Accordion>
+
+  <Accordion title="WebRTC connection fails">
+    1. Ensure `webrtcIPsFromInterfaces: yes` is set
+    2. Check firewall rules for UDP port 8189
+    3. Verify STUN/TURN server configuration if behind NAT
+    4. Test with browser console for WebRTC errors
+  </Accordion>
+
+  <Accordion title="High latency">
+    1. Use WebRTC instead of HLS for lowest latency
+    2. Reduce HLS segment duration:
+       ```yaml
+       hlsSegmentDuration: 1s
+       hlsPartDuration: 200ms
+       ```
+    3. Use TCP transport for RTSP to avoid packet loss:
+       ```bash
+       rtsp://server:8554/stream?rtsp_transport=tcp
+       ```
+  </Accordion>
+
+  <Accordion title="Recording not working">
+    1. Verify record is enabled for the path
+    2. Check disk space availability
+    3. Ensure recording directory has write permissions
+    4. Check `recordPath` template syntax
+  </Accordion>
+</AccordionGroup>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="MediaMTX Documentation" icon="book" href="https://github.com/bluenviron/mediamtx">
+    Official MediaMTX documentation
+  </Card>
+  <Card title="Devices" icon="microchip" href="/concepts/devices">
+    Configure device streaming sources
+  </Card>
+  <Card title="Actions" icon="bolt" href="/concepts/actions">
+    Control streams with actions
+  </Card>
+</CardGroup>

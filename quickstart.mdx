@@ -1,80 +1,323 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart guide
+description: Get Joystick IoT up and running in minutes with Docker Compose
 ---
 
-## Get started in three steps
+# Quickstart guide
 
-Get your documentation site running locally and make your first customization.
+This guide will help you deploy Joystick IoT locally using Docker Compose. You'll have a fully functional IoT platform running in minutes.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+Before you begin, ensure you have the following installed:
 
-### Step 2: Deploy your changes
+- **Docker**: Version 20.10 or later
+- **Docker Compose**: Version 2.0 or later
+- **Linux/amd64 platform**: Or Docker Desktop with amd64 emulation enabled
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Note>
+  All Joystick services run on `linux/amd64`. If you're using an ARM-based Mac (M1/M2/M3), Docker Desktop will automatically handle platform emulation.
+</Note>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Installation
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Joystick repository to your local machine:
 
-### Step 3: Go live
+    ```bash
+    git clone https://github.com/yourusername/joystick.git
+    cd joystick
+    ```
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Review the Docker Compose configuration">
+    The `docker-compose.yml` file orchestrates all services. Key services include:
+
+    - **Traefik** (port 80): Reverse proxy and load balancer
+    - **PocketBase** (port 8090): Database and authentication
+    - **MediaMTX** (network_mode: host): Video streaming server
+    - **App**: Web interface (via Traefik at `/`)
+    - **Joystick**: Device control API (via Traefik at `/joystick`)
+    - **Panel, Baker, Studio, Switcher, Whisper**: Supporting microservices
+
+    <Info>
+      MediaMTX uses `network_mode: host` for optimal streaming performance. It will use ports 8554 (RTSP), 8888 (HLS), and 9997 (API).
+    </Info>
+  </Step>
+
+  <Step title="Start the platform">
+    Launch all services with Docker Compose:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    This will pull the latest images from GitHub Container Registry and start all services in detached mode.
+
+    <Note>
+      First-time startup may take a few minutes to download all container images.
+    </Note>
+  </Step>
+
+  <Step title="Verify services are running">
+    Check that all services are healthy:
+
+    ```bash
+    docker-compose ps
+    ```
+
+    You should see all services in the `running` state. PocketBase includes a health check that must pass before dependent services start.
+  </Step>
+
+  <Step title="Access the web interface">
+    Open your browser and navigate to:
+
+    ```
+    http://localhost
+    ```
+
+    You'll see the Joystick web interface.
+  </Step>
+</Steps>
+
+## First login
+
+After deployment, you'll need to create an admin account and authenticate.
+
+<Steps>
+  <Step title="Access PocketBase admin">
+    Navigate to the PocketBase admin interface:
+
+    ```
+    http://localhost:8090/_/
+    ```
+
+    Create an admin account when prompted.
+  </Step>
+
+  <Step title="Create a user account">
+    In the PocketBase admin interface:
+
+    1. Navigate to **Collections** > **users**
+    2. Click **New record**
+    3. Fill in the user details (email and password)
+    4. Save the record
+  </Step>
+
+  <Step title="Configure permissions">
+    Set up user permissions in the **permissions** collection:
+
+    1. Navigate to **Collections** > **permissions**
+    2. Create permission records for your user
+    3. Grant access to features like `device-control`, `device-gps`, `device-battery`, etc.
+
+    <Info>
+      See the [Authentication](/api/authentication) guide for detailed information about the permission system.
+    </Info>
+  </Step>
+
+  <Step title="Log in to Joystick">
+    Return to `http://localhost` and log in with your user credentials.
+  </Step>
+</Steps>
+
+## Test the API
+
+Verify that the Joystick API is working correctly.
+
+### Health check
+
+Test the public health endpoint (no authentication required):
+
+```bash
+curl http://localhost/joystick/api/health
+```
+
+You should receive a successful response.
+
+### Authenticated request
+
+Get a JWT token from PocketBase:
+
+```bash
+curl -X POST http://localhost:8090/api/collections/users/auth-with-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identity": "user@example.com",
+    "password": "yourpassword"
+  }'
+```
+
+Use the token to make authenticated API calls:
+
+```bash
+curl http://localhost/joystick/api/device-list \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Using the development API key
+
+For testing, you can use the development API key:
+
+```bash
+curl http://localhost/joystick/api/device-list \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+<Warning>
+  The development API key (`dev-api-key-12345`) is for testing only. Change it in production by setting the `JOYSTICK_API_KEY` environment variable.
+</Warning>
+
+## Configure your first device
+
+<Steps>
+  <Step title="Add a device">
+    In the Joystick web interface:
+
+    1. Navigate to **Devices**
+    2. Click **Add Device**
+    3. Enter device details (name, host, phone number)
+    4. Configure available actions
+    5. Save the device
+  </Step>
+
+  <Step title="Set up device permissions">
+    Grant yourself access to the device:
+
+    1. Edit the device in PocketBase admin
+    2. Add your user ID to the `allow` field (array of user IDs)
+    3. Save the changes
+  </Step>
+
+  <Step title="Execute an action">
+    Test device control by executing an action:
+
+    ```bash
+    curl -X POST http://localhost/joystick/api/run/DEVICE_ID/ACTION_ID \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"param": "value"}'
+    ```
+  </Step>
+</Steps>
+
+## Enable automatic slot switching
+
+For devices with dual connection slots, enable automatic failover:
+
+<Steps>
+  <Step title="Configure secondary slot">
+    In the device settings:
+
+    1. Enable **Configure Secondary Connection Slot**
+    2. Enter secondary slot host and phone number
+    3. Save the configuration
+  </Step>
+
+  <Step title="Enable auto-switching">
+    Check the **Enable automatic slot switching** option. The Switcher service will now:
+
+    - Run health checks every 30 seconds (default)
+    - Automatically failover to the secondary slot after 2 consecutive failures
+    - Switch back when the primary slot recovers
+  </Step>
+
+  <Step title="Monitor slot health">
+    Check slot health status:
+
+    ```bash
+    curl http://localhost/switcher/api/health/DEVICE_ID
+    ```
+
+    The response shows active slot, health status, and failure counts.
+  </Step>
+</Steps>
+
+## View logs
+
+Monitor service logs using Docker Compose:
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f joystick
+
+# Or use Dozzle (web-based log viewer)
+open http://localhost:8084
+```
+
+<Info>
+  Dozzle provides a web interface for viewing container logs in real-time at `http://localhost:8084`.
+</Info>
+
+## Environment variables
+
+Customize your deployment by setting environment variables:
+
+```bash
+# Set custom hostname
+export HOST=joystick.local
+docker-compose up -d
+
+# Set custom API key
+export JOYSTICK_API_KEY=your-secure-api-key
+docker-compose up -d
+```
+
+Key environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `localhost` | Hostname for Traefik routing |
+| `JOYSTICK_API_KEY` | `dev-api-key-12345` | API key for service authentication |
+| `SLOT_HEALTH_CHECK_INTERVAL` | `30` | Health check interval in seconds |
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Architecture overview" icon="diagram-project" href="/architecture">
+    Learn how the microservices work together
+  </Card>
+  <Card title="Authentication" icon="shield-halved" href="/api/authentication">
+    Understand JWT tokens and permissions
+  </Card>
+  <Card title="Device control" icon="gamepad" href="/api/device-control">
+    Master device actions and sensor monitoring
+  </Card>
+  <Card title="Slot switching" icon="arrows-rotate" href="/guides/slot-switching">
+    Configure automatic failover systems
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+### Services not starting
+
+- Verify Docker and Docker Compose are installed correctly
+- Check for port conflicts (especially 80, 8090, and host-mode ports)
+- Review logs: `docker-compose logs`
+
+### Cannot access web interface
+
+- Ensure Traefik is running: `docker-compose ps traefik`
+- Check Traefik dashboard: `http://localhost:8080`
+- Verify HOST environment variable matches your access URL
+
+### PocketBase health check failing
+
+- Wait a few moments for PocketBase to initialize
+- Check PocketBase logs: `docker-compose logs pocketbase`
+- Verify the `pb_data` volume is writable
+
+### Authentication errors
+
+- Ensure you've created a user in PocketBase
+- Verify JWT token is not expired
+- Check user permissions in the permissions collection
+
+<Warning>
+  If you continue experiencing issues, check the [GitHub Issues](https://github.com/yourusername/joystick/issues) or consult the detailed service logs.
+</Warning>

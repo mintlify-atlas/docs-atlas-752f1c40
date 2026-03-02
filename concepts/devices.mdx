@@ -1,0 +1,318 @@
+---
+title: Device management
+description: Learn how to configure devices, manage dual-SIM slots, and establish SSH connections in Joystick
+---
+
+## Overview
+
+Devices are the core entities in Joystick that represent physical IoT hardware. Each device contains configuration, connection information, and operational state that enables remote control and monitoring.
+
+## Device structure
+
+A device in Joystick consists of several key components:
+
+<Accordion title="Device fields">
+  <ParamField path="id" type="string" required>
+    Unique identifier for the device
+  </ParamField>
+  
+  <ParamField path="name" type="string">
+    Human-readable device name
+  </ParamField>
+  
+  <ParamField path="device" type="string" required>
+    Reference to the device model that defines capabilities
+  </ParamField>
+  
+  <ParamField path="status" type="enum">
+    Current operational status: `on`, `off`, or `waiting`
+  </ParamField>
+  
+  <ParamField path="mode" type="string" required>
+    Current operating mode of the device
+  </ParamField>
+  
+  <ParamField path="allow" type="string[]">
+    Array of user IDs with access to control this device
+  </ParamField>
+  
+  <ParamField path="information" type="object" required>
+    Connection and configuration details (see below)
+  </ParamField>
+  
+  <ParamField path="configuration" type="object">
+    Device-specific settings and parameters
+  </ParamField>
+  
+  <ParamField path="automation" type="object">
+    Automated scheduling configuration
+  </ParamField>
+</Accordion>
+
+## Device information
+
+The `information` field contains critical connection details and hardware-specific configuration:
+
+```typescript packages/core/src/types/index.ts
+export type DeviceInformation = {
+  user: string;
+  password: string;
+  key: string;
+  host: string;
+  port?: number;
+  phone?: string;
+  secondSlotHost?: string;
+  secondSlotPhone?: string;
+  activeSlot?: "primary" | "secondary";
+  autoSlotSwitch?: boolean;
+  battery_capacity?: number;
+  battery_factor?: number;
+  aspectRatio?: string;
+  harvest: {
+    interval?: number;
+    supportedTypes?: string[];
+    autoPull?: boolean;
+  };
+  // ... additional fields
+};
+```
+
+### SSH connection parameters
+
+<Tabs>
+  <Tab title="SSH key authentication">
+    The recommended method for secure device access:
+
+    ```json
+    {
+      "user": "root",
+      "host": "192.168.1.100",
+      "port": 22,
+      "key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEp...\n-----END RSA PRIVATE KEY-----"
+    }
+    ```
+
+    <Info>
+      SSH keys are stored securely and written to temporary files with 600 permissions during command execution.
+    </Info>
+  </Tab>
+
+  <Tab title="Password authentication">
+    Alternative authentication using password (less secure):
+
+    ```json
+    {
+      "user": "root",
+      "host": "192.168.1.100",
+      "port": 22,
+      "password": "your-password"
+    }
+    ```
+
+    <Warning>
+      Password authentication requires `sshpass` to be installed on the Joystick server.
+    </Warning>
+  </Tab>
+
+  <Tab title="Default authentication">
+    Use the system's default SSH configuration:
+
+    ```json
+    {
+      "user": "root",
+      "host": "192.168.1.100",
+      "port": 22
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Dual-SIM slot management
+
+Joystick supports devices with dual SIM slots, enabling automatic failover between network connections.
+
+### Slot configuration
+
+```json
+{
+  "host": "192.168.1.100",
+  "phone": "+1234567890",
+  "secondSlotHost": "192.168.1.101",
+  "secondSlotPhone": "+0987654321",
+  "activeSlot": "primary",
+  "autoSlotSwitch": true
+}
+```
+
+<ParamField path="activeSlot" type="enum">
+  Determines which SIM slot is currently active:
+  - `primary` - Uses `host` and `phone`
+  - `secondary` - Uses `secondSlotHost` and `secondSlotPhone`
+</ParamField>
+
+<ParamField path="autoSlotSwitch" type="boolean">
+  Enables automatic switching between slots when primary connection fails
+</ParamField>
+
+### Active connection resolution
+
+Joystick automatically determines the active connection based on the slot configuration:
+
+```typescript packages/core/src/device.ts
+export const getActiveDeviceConnection = (
+  deviceInfo: DeviceInformation
+): { host: string; phone?: string } => {
+  if (deviceInfo.activeSlot === "secondary" && deviceInfo.secondSlotHost) {
+    return {
+      host: deviceInfo.secondSlotHost,
+      phone: deviceInfo.secondSlotPhone,
+    };
+  }
+  return {
+    host: deviceInfo.host,
+    phone: deviceInfo.phone,
+  };
+};
+```
+
+<Note>
+  The active slot is used for all SSH commands and network operations. The switcher service monitors connection health and can automatically change slots.
+</Note>
+
+## Device automation
+
+Devices support automated mode switching based on time or duration:
+
+<Tabs>
+  <Tab title="Duration-based">
+    Switch modes after a specified time period:
+
+    ```json
+    {
+      "automationType": "duration",
+      "on": {
+        "mode": "active",
+        "minutes": 30
+      },
+      "off": {
+        "mode": "standby",
+        "minutes": 60
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Time-based">
+    Switch modes at specific times of day:
+
+    ```json
+    {
+      "automationType": "timeOfDay",
+      "on": {
+        "mode": "active",
+        "utcDate": "2024-01-01T08:00:00Z"
+      },
+      "off": {
+        "mode": "standby",
+        "utcDate": "2024-01-01T18:00:00Z"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration examples
+
+### Complete device configuration
+
+```json
+{
+  "name": "Field Camera 01",
+  "device": "model_id_here",
+  "status": "on",
+  "mode": "monitoring",
+  "allow": ["user_id_1", "user_id_2"],
+  "information": {
+    "user": "root",
+    "host": "192.168.1.100",
+    "port": 22,
+    "key": "-----BEGIN RSA PRIVATE KEY-----\n...",
+    "phone": "+1234567890",
+    "secondSlotHost": "192.168.1.101",
+    "secondSlotPhone": "+0987654321",
+    "activeSlot": "primary",
+    "autoSlotSwitch": true,
+    "battery_capacity": 5000,
+    "battery_factor": 1.2,
+    "aspectRatio": "16:9",
+    "harvest": {
+      "interval": 3600,
+      "supportedTypes": ["image", "video"],
+      "autoPull": true
+    }
+  },
+  "configuration": {
+    "name": "Primary Stream",
+    "source": "rtsp://device/stream1"
+  },
+  "automation": {
+    "automationType": "timeOfDay",
+    "on": {
+      "mode": "active",
+      "utcDate": "2024-01-01T08:00:00Z"
+    },
+    "off": {
+      "mode": "standby",
+      "utcDate": "2024-01-01T18:00:00Z"
+    }
+  }
+}
+```
+
+## Device access control
+
+Access to devices is controlled through the `allow` field, which contains an array of user IDs:
+
+```typescript
+// Only users in the 'allow' array can:
+// - Execute actions on the device
+// - View device details
+// - Modify device settings
+// - Access device streams
+```
+
+<Warning>
+  Users not in the `allow` list will receive a 403 Forbidden error when attempting to control the device, even with valid authentication.
+</Warning>
+
+## Device status monitoring
+
+Joystick provides a ping endpoint to check device connectivity:
+
+```bash
+curl -X GET "http://localhost:8000/api/ping/DEVICE_ID" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+The ping command:
+1. Retrieves the active host using `getActiveDeviceConnection()`
+2. Executes `ping -c 1 {host}`
+3. Returns connection status
+
+<Info>
+  You can customize the expected ping result using the `result` query parameter for non-standard ping outputs.
+</Info>
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Actions" icon="bolt" href="/concepts/actions">
+    Learn how to execute commands on devices
+  </Card>
+  <Card title="Streaming" icon="video" href="/concepts/streaming">
+    Configure video streams from devices
+  </Card>
+  <Card title="Authentication" icon="lock" href="/concepts/authentication">
+    Understand device access control
+  </Card>
+</CardGroup>

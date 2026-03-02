@@ -1,0 +1,167 @@
+---
+title: Installation
+description: Installation prerequisites and steps for Joystick IoT platform
+---
+
+## System requirements
+
+Before installing Joystick IoT platform, ensure your system meets the following requirements:
+
+- Docker Engine 20.10 or later
+- Docker Compose 2.0 or later
+- At least 4GB of available RAM
+- 10GB of free disk space
+- Linux, macOS, or Windows with WSL2
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install Docker">
+    Download and install Docker Desktop from [docker.com](https://www.docker.com/products/docker-desktop/) or install Docker Engine on your server.
+
+    Verify Docker is installed correctly:
+    ```bash
+    docker --version
+    docker-compose --version
+    ```
+  </Step>
+
+  <Step title="Verify Docker is running">
+    Check that Docker daemon is running:
+    ```bash
+    docker ps
+    ```
+
+    You should see an empty list of containers or existing containers without errors.
+  </Step>
+
+  <Step title="Clone the repository">
+    Clone the Joystick IoT platform repository:
+    ```bash
+    git clone https://github.com/skylineagle/joystick.git
+    cd joystick
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the root directory or set the `HOST` environment variable:
+    ```bash
+    export HOST=localhost
+    ```
+
+    For production deployments, set this to your domain name:
+    ```bash
+    export HOST=joystick.yourdomain.com
+    ```
+
+    See the [configuration](/deployment/configuration) page for more details on environment variables.
+  </Step>
+</Steps>
+
+## Installation
+
+<Steps>
+  <Step title="Pull Docker images">
+    Pull the latest Docker images from GitHub Container Registry:
+    ```bash
+    docker-compose pull
+    ```
+
+    This will download all required service images:
+    - Traefik (reverse proxy)
+    - PocketBase (database)
+    - MediaMTX (video streaming)
+    - Joystick API
+    - Panel UI
+    - Baker service
+    - Switcher service
+    - Whisper service
+    - Studio UI
+    - Dozzle (log viewer)
+  </Step>
+
+  <Step title="Start the services">
+    Start all services using Docker Compose:
+    ```bash
+    docker-compose up -d
+    ```
+
+    The `-d` flag runs containers in detached mode (background).
+  </Step>
+
+  <Step title="Verify services are running">
+    Check that all containers are running:
+    ```bash
+    docker-compose ps
+    ```
+
+    All services should show a "running" status.
+  </Step>
+
+  <Step title="Access the platform">
+    Open your browser and navigate to:
+    - Main application: `http://localhost`
+    - PocketBase admin: `http://localhost:8090/_/`
+    - Traefik dashboard: `http://localhost:8080`
+    - Dozzle logs: `http://localhost:8084`
+  </Step>
+</Steps>
+
+## Platform-specific installation
+
+### Linux
+
+For Linux deployments, use the `docker-compose.linux.yml` file which uses host networking for better performance:
+
+```bash
+docker-compose -f docker-compose.linux.yml up -d
+```
+
+This configuration uses `network_mode: host` for all services, allowing direct network access without Docker's bridge network overhead.
+
+### Development environment
+
+For local development with mounted volumes and live code changes:
+
+```bash
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+This configuration:
+- Mounts local code directories as volumes
+- Exposes additional ports for debugging
+- Uses the development PocketBase image with hooks and migrations mounted
+
+## Post-installation
+
+After installation:
+
+1. Create your first admin user in PocketBase at `http://localhost:8090/_/`
+2. Configure authentication and API keys (see [security](/deployment/security))
+3. Set up monitoring and logging (see [monitoring](/deployment/monitoring))
+4. Review security best practices (see [security](/deployment/security))
+
+## Updating
+
+To update to the latest version:
+
+```bash
+docker-compose pull
+docker-compose up -d
+```
+
+Docker Compose will automatically recreate containers with updated images while preserving data volumes.
+
+## Uninstallation
+
+To stop and remove all containers:
+
+```bash
+docker-compose down
+```
+
+To also remove volumes (this will delete all data):
+
+```bash
+docker-compose down -v
+```

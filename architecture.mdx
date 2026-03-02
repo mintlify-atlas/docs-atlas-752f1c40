@@ -1,0 +1,580 @@
+---
+title: System architecture
+description: Understand the microservices architecture and components that power Joystick IoT
+---
+
+# System architecture
+
+Joystick is built on a modern microservices architecture, with each service handling specific responsibilities. All services communicate through a unified network layer orchestrated by Docker Compose and Traefik.
+
+## Architecture diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Traefik (Port 80)                       │
+│                    Reverse Proxy & Routing                      │
+└────┬────────┬─────────┬─────────┬─────────┬─────────┬─────────┘
+     │        │         │         │         │         │
+     ▼        ▼         ▼         ▼         ▼         ▼
+  ┌────┐  ┌─────┐  ┌──────┐  ┌────┐  ┌────┐  ┌───────┐
+  │App │  │Panel│  │Baker │  │Joy │  │Swit│  │Studio │
+  │:80 │  │:4000│  │:3000 │  │:800│  │:808│  │:8001  │
+  └──┬─┘  └──┬──┘  └───┬──┘  └─┬──┘  └─┬──┘  └───┬───┘
+     │       │         │       │       │         │
+     └───────┴─────────┴───────┴───────┴─────────┘
+                         │
+                ┌────────┴────────┐
+                ▼                 ▼
+         ┌──────────┐      ┌──────────┐
+         │PocketBase│      │ MediaMTX │
+         │  :8090   │      │   :9997  │
+         │          │      │ (host)   │
+         │ Database │      │ Streaming│
+         │   Auth   │      │  Server  │
+         │Realtime  │      └──────────┘
+         └──────────┘
+```
+
+## Core services
+
+### Traefik
+
+**Role**: Reverse proxy and load balancer
+
+**Ports**: 80 (HTTP), 8080 (Dashboard)
+
+**Responsibilities**:
+- Routes incoming requests to appropriate services based on path prefixes
+- Handles CORS headers for cross-origin requests
+- Provides service discovery through Docker labels
+- Exposes dashboard for monitoring routes and backends
+
+**Configuration**:
+```yaml
+services:
+  traefik:
+    image: traefik:v2.11
+    ports:
+      - "80:80"
+      - "8080:8080"
+    command:
+      - "--providers.docker"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+      - "--api.dashboard=true"
+```
+
+<Info>
+  Access the Traefik dashboard at `http://localhost:8080` to view active routes and service health.
+</Info>
+
+### PocketBase
+
+**Role**: Database, authentication, and real-time subscriptions
+
+**Port**: 8090
+
+**Responsibilities**:
+- User authentication with JWT tokens
+- SQLite database for all application data
+- Real-time subscriptions via WebSocket
+- Admin dashboard for data management
+- Automated migrations and hooks
+- Device access control and permissions
+
+**Key collections**:
+- `users`: User accounts and authentication
+- `devices`: Device configurations and connection details
+- `actions`: Available device actions and parameters
+- `permissions`: Feature-based access control
+- `logs`: Action execution history
+- `sensors`: GPS, IMU, battery, and signal data
+
+**Environment variables**:
+```bash
+BAKER_URL=http://baker:3000
+MEDIAMTX_API=http://host.docker.internal:9997
+JOYSTICK_API_URL=http://joystick:8000
+JOYSTICK_API_KEY=dev-api-key-12345
+```
+
+<Note>
+  PocketBase includes a health check endpoint at `/api/health`. All dependent services wait for PocketBase to be healthy before starting.
+</Note>
+
+### MediaMTX
+
+**Role**: Video streaming server
+
+**Network**: Host mode (uses ports 8554, 8888, 9997)
+
+**Responsibilities**:
+- RTSP stream ingestion from devices
+- WebRTC streaming to browsers
+- HLS streaming support
+- Stream management API
+- Automatic stream health monitoring
+
+**Protocol support**:
+- **RTSP** (port 8554): Input from devices
+- **WebRTC**: Browser-based viewing
+- **HLS** (port 8888): HTTP Live Streaming
+- **API** (port 9997): Stream management
+
+**Configuration**:
+```yaml
+mediamtx:
+  image: bluenviron/mediamtx:1.11.2
+  network_mode: host
+  volumes:
+    - ./mediamtx/mediamtx.yml:/mediamtx.yml
+```
+
+<Warning>
+  MediaMTX uses `network_mode: host` for optimal performance. Ensure ports 8554, 8888, and 9997 are available on your host.
+</Warning>
+
+### App
+
+**Role**: Web interface
+
+**Internal port**: 80 (exposed via Traefik at `/`)
+
+**Technology stack**:
+- React 19 with TypeScript
+- Vite for build and dev server
+- TanStack Query for data fetching
+- Zustand for state management
+- Tailwind CSS for styling
+- React Router for navigation
+
+**Key features**:
+- Device management interface
+- Real-time video streaming
+- Action execution and logging
+- Sensor data visualization
+- User authentication
+- Permission management
+
+**Dependencies**:
+```json
+{
+  "react": "^19.1.0",
+  "@tanstack/react-query": "^5.77.0",
+  "zustand": "^5.0.5",
+  "pocketbase": "^0.25.2",
+  "react-router-dom": "^7.6.0"
+}
+```
+
+### Joystick
+
+**Role**: Core device control API
+
+**Port**: 8000 (exposed via Traefik at `/joystick`)
+
+**Framework**: Elysia (Bun-based web framework)
+
+**Responsibilities**:
+- Device action execution
+- Authentication and authorization
+- Sensor data collection
+- Device health monitoring
+- Notification management
+- API documentation via Swagger
+
+**Key endpoints**:
+- `POST /api/run/:device/:action` - Execute device action
+- `GET /api/ping/:device` - Check device connectivity
+- `GET /api/cpsi` - Cellular signal data
+- `GET /api/battery` - Battery status
+- `GET /api/gps` - GPS coordinates
+- `GET /api/imu` - IMU sensor data
+- `POST /api/notifications/send` - Send push notifications
+
+**Authentication methods**:
+1. JWT Bearer token (production)
+2. Query parameter token
+3. X-API-Key header (development)
+
+**Environment variables**:
+```bash
+STREAM_API_URL=http://host.docker.internal:9997
+POCKETBASE_URL=http://pocketbase:8090
+SWITCHER_API_URL=http://switcher:8080
+PORT=8000
+HOST=0.0.0.0
+```
+
+<Info>
+  The Swagger documentation is available at `http://localhost/joystick/swagger` with interactive API testing.
+</Info>
+
+### Switcher
+
+**Role**: Automatic slot switching and health monitoring
+
+**Port**: 8080 (exposed via Traefik at `/switcher`)
+
+**Responsibilities**:
+- Health check execution every 30 seconds
+- Automatic failover between primary and secondary slots
+- Slot health status tracking
+- Manual slot switching API
+- Failure count monitoring
+
+**Health check process**:
+1. Query devices with `autoSlotSwitch=true`
+2. Execute `slot-check` action on active slot
+3. Track consecutive failures
+4. Switch to alternate slot after 2 failures
+5. Update device `activeSlot` field
+6. Trigger stream URL updates via PocketBase hooks
+
+**API endpoints**:
+- `POST /api/slot/:deviceId/:slot` - Manual slot switch
+- `GET /api/health/:deviceId?` - Get health status
+- `POST /api/health/check` - Trigger health check
+
+**Environment variables**:
+```bash
+STREAM_API_URL=http://host.docker.internal:9997
+POCKETBASE_URL=http://pocketbase:8090
+JOYSTICK_API_URL=http://joystick:8000
+JOYSTICK_API_KEY=dev-api-key-12345
+SLOT_HEALTH_CHECK_INTERVAL=30
+PORT=8080
+```
+
+<Note>
+  The Switcher service ensures 24/7 uptime by automatically switching to healthy backup connections when the primary fails.
+</Note>
+
+### Panel
+
+**Role**: Device status dashboard
+
+**Port**: 4000 (exposed via Traefik at `/panel`)
+
+**Responsibilities**:
+- Real-time device status monitoring
+- Aggregated sensor data views
+- System health dashboards
+- Alert management interface
+
+**Environment variables**:
+```bash
+POCKETBASE_URL=http://pocketbase:8090
+PORT=4000
+```
+
+### Baker
+
+**Role**: Stream management and video processing
+
+**Port**: 3000 (exposed via Traefik at `/baker`)
+
+**Responsibilities**:
+- Stream URL generation and management
+- Video stream health monitoring
+- Stream metadata processing
+- Integration with MediaMTX API
+
+**Environment variables**:
+```bash
+PORT=3000
+STREAM_API_URL=http://host.docker.internal:9997
+POCKETBASE_URL=http://pocketbase:8090
+JOYSTICK_API_URL=http://joystick:8000
+```
+
+### Studio
+
+**Role**: Advanced video compositing and layouts
+
+**Port**: 8001 (exposed via Traefik at `/studio`)
+
+**Responsibilities**:
+- Multi-stream video compositing
+- Custom layout generation
+- Video effects and overlays
+- Scene management
+
+**Environment variables**:
+```bash
+POCKETBASE_URL=http://pocketbase:8090
+JOYSTICK_API_URL=http://joystick:8000
+PORT=8001
+```
+
+### Whisper
+
+**Role**: Audio processing and communication
+
+**Port**: 8081 (exposed via Traefik at `/whisper`)
+
+**Responsibilities**:
+- Audio stream processing
+- Voice communication handling
+- Audio analytics
+
+**Environment variables**:
+```bash
+STREAM_API_URL=http://host.docker.internal:9997
+POCKETBASE_URL=http://pocketbase:8090
+JOYSTICK_API_URL=http://joystick:8000
+PORT=8081
+```
+
+### Dozzle
+
+**Role**: Web-based log viewer
+
+**Port**: 8084
+
+**Responsibilities**:
+- Real-time container log streaming
+- Multi-container log aggregation
+- Log search and filtering
+- Container management interface
+
+## Network architecture
+
+### App network
+
+All services (except MediaMTX) communicate through a bridge network:
+
+```yaml
+networks:
+  app-network:
+    driver: bridge
+```
+
+**Network configuration**:
+- Custom bridge network for service isolation
+- DNS resolution by service name
+- CORS enabled on all HTTP services
+- Extra hosts for `host.docker.internal` access
+
+### Host network access
+
+Services access the host network using:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+This allows containers to communicate with MediaMTX running in host mode.
+
+## Data flow
+
+### Device action execution
+
+<Steps>
+  <Step title="User initiates action">
+    User clicks action button in the App interface
+  </Step>
+
+  <Step title="API authentication">
+    App sends authenticated request to Joystick API with JWT token
+  </Step>
+
+  <Step title="Permission validation">
+    Joystick validates user permissions and device access via PocketBase
+  </Step>
+
+  <Step title="Action execution">
+    Joystick executes the action on the target device
+  </Step>
+
+  <Step title="Logging and response">
+    Execution result logged to PocketBase and returned to user
+  </Step>
+</Steps>
+
+### Video streaming flow
+
+<Steps>
+  <Step title="Device streams to MediaMTX">
+    Device sends RTSP stream to MediaMTX (port 8554)
+  </Step>
+
+  <Step title="Stream registration">
+    Baker registers stream metadata in PocketBase
+  </Step>
+
+  <Step title="User requests stream">
+    App requests WebRTC stream from MediaMTX
+  </Step>
+
+  <Step title="Stream delivery">
+    MediaMTX converts RTSP to WebRTC and delivers to browser
+  </Step>
+</Steps>
+
+### Automatic slot switching flow
+
+<Steps>
+  <Step title="Health check timer">
+    Switcher runs health check every 30 seconds
+  </Step>
+
+  <Step title="Ping active slot">
+    Switcher executes `slot-check` action via Joystick API
+  </Step>
+
+  <Step title="Failure detection">
+    If check fails, increment failure counter
+  </Step>
+
+  <Step title="Automatic failover">
+    After 2 consecutive failures, switch to alternate slot
+  </Step>
+
+  <Step title="Update configuration">
+    Switcher updates `activeSlot` field in PocketBase
+  </Step>
+
+  <Step title="Stream URL update">
+    PocketBase hook updates stream URLs to use new slot
+  </Step>
+
+  <Step title="User notification">
+    System sends notification about slot change
+  </Step>
+</Steps>
+
+## Volumes and persistence
+
+**PocketBase data volume**:
+```yaml
+volumes:
+  pb_data:
+```
+
+Stores:
+- SQLite database files
+- User uploads and attachments
+- Migration history
+
+**PocketBase migrations**:
+```yaml
+volumes:
+  - ./pocketbase/pb_migrations:/pb_migrations
+```
+
+Version-controlled database schema migrations.
+
+**MediaMTX configuration**:
+```yaml
+volumes:
+  - ./mediamtx/mediamtx.yml:/mediamtx.yml
+```
+
+Stream server configuration and path definitions.
+
+## Logging and monitoring
+
+### Log configuration
+
+All services use JSON file logging with rotation:
+
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
+
+**Log retention**: 3 files × 10MB = 30MB maximum per service
+
+### Monitoring tools
+
+1. **Traefik Dashboard** (`http://localhost:8080`)
+   - Service routing status
+   - Backend health
+   - Request metrics
+
+2. **Dozzle** (`http://localhost:8084`)
+   - Real-time log streaming
+   - Multi-container views
+   - Log search and filtering
+
+3. **PocketBase Admin** (`http://localhost:8090/_/`)
+   - Database records
+   - API logs
+   - Collection management
+
+4. **Swagger UI** (`http://localhost/joystick/swagger`)
+   - API endpoint testing
+   - Request/response inspection
+   - Authentication testing
+
+## Health checks
+
+**PocketBase health check**:
+```yaml
+healthcheck:
+  test: wget --no-verbose --tries=1 --spider http://localhost:8090/api/health || exit 1
+  interval: 5s
+  timeout: 5s
+  retries: 5
+```
+
+All services depending on PocketBase wait for this health check to pass:
+
+```yaml
+depends_on:
+  pocketbase:
+    condition: service_healthy
+```
+
+## Security considerations
+
+<Warning>
+  The default configuration uses development credentials. Always change these in production:
+  - `JOYSTICK_API_KEY`
+  - PocketBase admin password
+  - Database encryption keys
+</Warning>
+
+**Security features**:
+- JWT-based authentication
+- Feature-based permission system
+- Device-level access control
+- API key authentication for inter-service communication
+- CORS configuration for cross-origin requests
+- Isolated Docker network
+
+## Scaling considerations
+
+For production deployments:
+
+1. **Database**: Consider migrating from SQLite to PostgreSQL for concurrent writes
+2. **MediaMTX**: Deploy separate instances for different regions
+3. **Load balancing**: Use Traefik's built-in load balancing for multiple service replicas
+4. **Monitoring**: Add Prometheus and Grafana for metrics collection
+5. **Logging**: Integrate with centralized logging (ELK stack, Loki)
+
+<Info>
+  All services are stateless (except PocketBase) and can be horizontally scaled by running multiple replicas.
+</Info>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="shield-halved" href="/api/authentication">
+    Learn about JWT tokens and API keys
+  </Card>
+  <Card title="Device control" icon="gamepad" href="/api/device-control">
+    Master device actions and monitoring
+  </Card>
+  <Card title="Slot switching" icon="arrows-rotate" href="/guides/slot-switching">
+    Configure automatic failover
+  </Card>
+  <Card title="API reference" icon="code" href="/api/studio/overview">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,376 @@
+---
+title: Security
+description: Security best practices for Joystick IoT platform
+---
+
+## API key security
+
+### Default API key
+
+**WARNING**: The default API key (`dev-api-key-12345`) is for development only and must be changed in production.
+
+### Changing the API key
+
+<Steps>
+  <Step title="Generate a secure API key">
+    ```bash
+    # Generate a random API key
+    openssl rand -hex 32
+    ```
+
+    Or use a password manager to generate a strong random string.
+  </Step>
+
+  <Step title="Set the API key environment variable">
+    Update the `JOYSTICK_API_KEY` in your `.env` file or docker-compose.yml:
+    ```bash
+    JOYSTICK_API_KEY=your-secure-random-key-here
+    ```
+  </Step>
+
+  <Step title="Update all services">
+    The API key must be set in both services that use it:
+    - **PocketBase**: Uses it to authenticate with Joystick API
+    - **Switcher**: Uses it to authenticate with Joystick API
+
+    Restart services after updating:
+    ```bash
+    docker-compose up -d
+    ```
+  </Step>
+
+  <Step title="Verify the change">
+    Test with the new API key:
+    ```bash
+    curl -H "X-API-Key: your-secure-random-key-here" \
+      http://localhost:8000/api/health
+    ```
+  </Step>
+</Steps>
+
+### API key storage
+
+**Best practices**:
+- Never commit API keys to version control
+- Add `.env` to `.gitignore`
+- Use environment variables or secrets management services
+- Rotate API keys periodically
+- Use different keys for different environments (dev, staging, production)
+
+## JWT token authentication
+
+### How JWT authentication works
+
+1. User authenticates with PocketBase using email/password
+2. PocketBase returns a JWT token
+3. Client includes JWT in subsequent requests via:
+   - `Authorization: Bearer <token>` header, or
+   - `?token=<token>` query parameter
+
+### Getting a JWT token
+
+```bash
+curl -X POST http://localhost:8090/api/collections/users/auth-with-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identity": "user@example.com",
+    "password": "password"
+  }'
+```
+
+Response:
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "record": { ... }
+}
+```
+
+### Using JWT tokens
+
+#### Bearer token in header
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/action123 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"param": "value"}'
+```
+
+#### Query parameter
+
+```bash
+curl -X POST "http://localhost:8000/api/run/device123/action123?token=YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"param": "value"}'
+```
+
+### Token expiration
+
+JWT tokens expire after a configured period (typically 24 hours). When a token expires:
+
+1. Requests will return `401 Unauthorized`
+2. Client must re-authenticate to get a new token
+3. Implement token refresh logic in your application
+
+### Token security best practices
+
+- Store tokens securely (e.g., httpOnly cookies, secure storage)
+- Never expose tokens in URLs in production (use headers instead)
+- Implement token refresh before expiration
+- Validate tokens on the server side
+- Use HTTPS in production to prevent token interception
+
+## Permissions system
+
+### Feature-based permissions
+
+Joystick uses a feature-based permission system. Users must have specific permissions to access certain endpoints.
+
+#### Permission types
+
+| Permission | Endpoints | Description |
+|------------|-----------|-------------|
+| `device-cpsi` | `GET /api/cpsi` | Access cellular signal information |
+| `device-battery` | `GET /api/battery` | Access battery status |
+| `device-gps` | `GET /api/gps` | Access GPS location data |
+| `device-imu` | `GET /api/imu` | Access IMU sensor data |
+| `notifications` | `POST /api/notifications/send` | Send notifications |
+
+#### Assigning permissions
+
+Permissions are stored in the `permissions` collection in PocketBase:
+
+1. Go to PocketBase admin panel at `http://localhost:8090/_/`
+2. Navigate to the `permissions` collection
+3. Create or edit permission records for users
+4. Add the required permission names to the user's permission list
+
+### Device access control
+
+Users can only control devices they have explicit access to.
+
+#### Device allow list
+
+Each device has an `allow` field containing an array of user IDs:
+
+```json
+{
+  "id": "device123",
+  "name": "My Device",
+  "allow": ["user_id_1", "user_id_2"]
+}
+```
+
+#### Granting device access
+
+<Steps>
+  <Step title="Get user ID">
+    Find the user ID in PocketBase admin panel under the `users` collection.
+  </Step>
+
+  <Step title="Update device">
+    Edit the device record and add the user ID to the `allow` array.
+  </Step>
+
+  <Step title="Verify access">
+    Test that the user can now control the device:
+    ```bash
+    curl -X POST http://localhost:8000/api/run/device123/action123 \
+      -H "Authorization: Bearer USER_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"param": "value"}'
+    ```
+  </Step>
+</Steps>
+
+## Network security
+
+### Firewall configuration
+
+Only expose necessary ports to the internet:
+
+**Public (with authentication)**:
+- Port 80 (HTTP) - Main application
+- Port 443 (HTTPS) - If using TLS
+
+**Internal only** (block external access):
+- Port 8080 - Traefik dashboard
+- Port 8084 - Dozzle logs
+- Port 8090 - PocketBase admin
+- Port 9997 - MediaMTX API
+
+#### Example firewall rules (ufw)
+
+```bash
+# Allow HTTP/HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# Block internal services
+sudo ufw deny 8080/tcp
+sudo ufw deny 8084/tcp
+sudo ufw deny 8090/tcp
+sudo ufw deny 9997/tcp
+
+# Enable firewall
+sudo ufw enable
+```
+
+### HTTPS/TLS configuration
+
+For production deployments, enable HTTPS using Let's Encrypt with Traefik.
+
+#### Update Traefik configuration
+
+```yaml
+traefik:
+  command:
+    - "--providers.docker"
+    - "--entrypoints.web.address=:80"
+    - "--entrypoints.websecure.address=:443"
+    - "--certificatesresolvers.myresolver.acme.email=admin@example.com"
+    - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+  volumes:
+    - ./letsencrypt:/letsencrypt
+  ports:
+    - "80:80"
+    - "443:443"
+```
+
+#### Enable HTTPS redirect
+
+```yaml
+labels:
+  - "traefik.http.routers.app.entrypoints=websecure"
+  - "traefik.http.routers.app.tls.certresolver=myresolver"
+```
+
+### CORS configuration
+
+CORS is currently configured to allow all origins (`*`). For production, restrict to specific domains:
+
+```yaml
+labels:
+  - "traefik.http.middlewares.cors.headers.accesscontrolalloworiginlist=https://yourdomain.com,https://app.yourdomain.com"
+```
+
+## Docker security
+
+### Run containers as non-root
+
+By default, containers run as root. For production, create a non-root user:
+
+```dockerfile
+RUN addgroup -g 1001 -S appuser && \
+    adduser -u 1001 -S appuser -G appuser
+USER appuser
+```
+
+### Use read-only root filesystem
+
+```yaml
+services:
+  joystick:
+    read_only: true
+    tmpfs:
+      - /tmp
+```
+
+### Limit container resources
+
+```yaml
+services:
+  joystick:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+```
+
+### Security scanning
+
+Scan images for vulnerabilities:
+
+```bash
+# Using Docker Scout
+docker scout cves ghcr.io/skylineagle/joystick/joystick:latest
+
+# Using Trivy
+trivy image ghcr.io/skylineagle/joystick/joystick:latest
+```
+
+## PocketBase security
+
+### Admin account
+
+1. Create a strong password for the admin account
+2. Change the default admin email
+3. Enable two-factor authentication if available
+4. Restrict admin panel access to specific IPs
+
+### Database backups
+
+Regularly backup PocketBase data:
+
+```bash
+# Backup
+docker run --rm -v joystick_pb_data:/data -v $(pwd):/backup \
+  alpine tar czf /backup/pb_backup_$(date +%Y%m%d).tar.gz /data
+
+# Automate with cron
+0 2 * * * /path/to/backup-script.sh
+```
+
+### Collection rules
+
+Configure PocketBase collection rules to restrict access:
+
+- **List/View**: `@request.auth.id != ""` (authenticated users only)
+- **Create/Update/Delete**: `@request.auth.id = owner` (owner only)
+
+## MediaMTX security
+
+### Authentication
+
+Configure authentication in `mediamtx.yml`:
+
+```yaml
+authMethod: internal
+authInternalUsers:
+  - user: publisher
+    pass: "secure-password-here"
+    permissions:
+      - action: publish
+      - action: read
+```
+
+### API access
+
+Restrict API access to localhost or specific IPs:
+
+```yaml
+apiAddress: 127.0.0.1:9997  # Localhost only
+```
+
+## Security checklist
+
+Before deploying to production:
+
+- [ ] Change default API key (`JOYSTICK_API_KEY`)
+- [ ] Enable HTTPS with valid SSL certificates
+- [ ] Configure firewall rules
+- [ ] Set strong passwords for PocketBase admin
+- [ ] Restrict CORS to specific domains
+- [ ] Configure proper file permissions for volumes
+- [ ] Enable Docker security scanning
+- [ ] Set up automated backups
+- [ ] Review and restrict PocketBase collection rules
+- [ ] Configure MediaMTX authentication
+- [ ] Disable Traefik insecure API
+- [ ] Disable Dozzle in production or add authentication
+- [ ] Set resource limits on containers
+- [ ] Enable audit logging
+- [ ] Document security procedures for your team

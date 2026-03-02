@@ -1,0 +1,199 @@
+---
+title: Configuration
+description: Environment variables and configuration settings for Joystick IoT platform
+---
+
+## Environment variables
+
+Joystick IoT platform uses environment variables to configure services. You can set these in a `.env` file in the root directory or export them in your shell.
+
+### Global settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `HOST` | Hostname for Traefik routing | `localhost` | No |
+
+### Joystick API
+
+The main API service that handles device control and communication.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `STREAM_API_URL` | MediaMTX API endpoint | `http://host.docker.internal:9997` | Yes |
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `SWITCHER_API_URL` | Switcher service URL | `http://switcher:8080` | Yes |
+| `PORT` | API server port | `8000` | No |
+| `HOST` | API server host | `0.0.0.0` | No |
+| `JOYSTICK_API_KEY` | API key for service authentication | `dev-api-key-12345` | Yes (production) |
+
+### PocketBase
+
+Database and authentication service.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `BAKER_URL` | Baker service URL | `http://baker:3000` | Yes |
+| `MEDIAMTX_API` | MediaMTX API endpoint | `http://host.docker.internal:9997` | Yes |
+| `JOYSTICK_API_URL` | Joystick API URL | `http://joystick:8000` | Yes |
+| `JOYSTICK_API_KEY` | API key to authenticate with Joystick | `dev-api-key-12345` | Yes |
+
+### Panel UI
+
+Web-based control panel interface.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `PORT` | Panel server port | `4000` | No |
+
+### Baker
+
+Video processing and streaming service.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PORT` | Baker server port | `3000` | No |
+| `STREAM_API_URL` | MediaMTX API endpoint | `http://host.docker.internal:9997` | Yes |
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `JOYSTICK_API_URL` | Joystick API URL | `http://joystick:8000` | Yes |
+
+### Switcher
+
+Stream switching and health monitoring service.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `STREAM_API_URL` | MediaMTX API endpoint | `http://host.docker.internal:9997` | Yes |
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `JOYSTICK_API_URL` | Joystick API URL | `http://joystick:8000` | Yes |
+| `JOYSTICK_API_KEY` | API key to authenticate with Joystick | `dev-api-key-12345` | Yes |
+| `SLOT_HEALTH_CHECK_INTERVAL` | Health check interval in seconds | `30` | No |
+| `PORT` | Switcher server port | `8080` | No |
+
+### Whisper
+
+Audio processing and communication service.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `STREAM_API_URL` | MediaMTX API endpoint | `http://host.docker.internal:9997` | Yes |
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `JOYSTICK_API_URL` | Joystick API URL | `http://joystick:8000` | Yes |
+| `PORT` | Whisper server port | `8081` | No |
+
+### Studio
+
+Production control interface.
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `POCKETBASE_URL` | PocketBase database URL | `http://pocketbase:8090` | Yes |
+| `JOYSTICK_API_URL` | Joystick API URL | `http://joystick:8000` | Yes |
+| `PORT` | Studio server port | `8001` | No |
+
+## Example configuration
+
+Create a `.env` file in your project root:
+
+```bash
+# Global settings
+HOST=joystick.example.com
+
+# Security (change these in production!)
+JOYSTICK_API_KEY=your-secure-api-key-here
+```
+
+## Service dependencies
+
+Services have the following dependencies:
+
+- **PocketBase**: Core database, must start first
+- **MediaMTX**: Video streaming server, required by most services
+- **Joystick API**: Depends on PocketBase and MediaMTX
+- **Panel, Baker, Switcher, Whisper, Studio**: All depend on PocketBase and MediaMTX
+
+## Docker networking
+
+### Standard deployment (docker-compose.yml)
+
+Uses a bridge network (`app-network`) with service name resolution. Services communicate using internal service names:
+
+```yaml
+networks:
+  app-network:
+    driver: bridge
+```
+
+Services reference each other by service name (e.g., `http://pocketbase:8090`).
+
+### Linux deployment (docker-compose.linux.yml)
+
+Uses host networking for better performance:
+
+```yaml
+network_mode: host
+```
+
+All services bind directly to the host network interface.
+
+### Development deployment (docker-compose.dev.yml)
+
+Uses bridge networking with exposed ports for debugging:
+
+```yaml
+ports:
+  - "8090:8090"  # PocketBase
+  - "9997:9997"  # MediaMTX API
+  - "8554:8554"  # RTSP
+```
+
+## Logging configuration
+
+All services use JSON file logging with rotation:
+
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
+
+This configuration:
+- Limits log files to 10MB each
+- Keeps up to 3 rotated log files per container
+- Uses JSON format for structured logging
+
+See [monitoring](/deployment/monitoring) for log viewing options.
+
+## Volume mounts
+
+### Persistent data
+
+PocketBase data is stored in a Docker volume:
+
+```yaml
+volumes:
+  pb_data:
+```
+
+### Configuration files
+
+MediaMTX configuration is mounted from the host:
+
+```yaml
+volumes:
+  - ./mediamtx/mediamtx.yml:/mediamtx.yml
+```
+
+### Development volumes
+
+In development mode, additional volumes are mounted:
+
+```yaml
+volumes:
+  - ./pocketbase/pb_data:/pb_data
+  - ./pocketbase/pb_public:/pb_public
+  - ./pocketbase/pb_hooks:/pb_hooks
+  - ./pocketbase/pb_migrations:/pb_migrations
+```

@@ -1,0 +1,338 @@
+---
+title: File watchers
+description: File watcher management endpoints for monitoring incoming media
+---
+
+The file watcher system automatically monitors incoming directories for each device and processes new media files as they arrive. The system provides automatic management with manual control when needed.
+
+## Automatic management
+
+File watchers are automatically managed by the Studio service:
+
+- **Auto-initialization** - Watchers are created for all devices on service startup
+- **Periodic sync** - Watchers sync with the device list every 5 minutes
+- **Graceful cleanup** - Orphaned watchers are cleaned up when devices are deleted
+- **Error recovery** - Watchers are automatically restarted if they encounter errors
+
+## Get watcher status
+
+<Card title="GET /api/watchers" icon="eye">
+  Get status of all file watchers
+</Card>
+
+### Response
+
+<ResponseField name="watchers" type="array" required>
+  Array of watcher status objects
+</ResponseField>
+
+<ResponseField name="watchers[].deviceId" type="string">
+  Device identifier
+</ResponseField>
+
+<ResponseField name="watchers[].active" type="boolean">
+  Whether the watcher is currently active
+</ResponseField>
+
+<ResponseField name="watchers[].path" type="string">
+  Path being monitored
+</ResponseField>
+
+<ResponseField name="watchers[].lastActivity" type="string">
+  ISO 8601 timestamp of last file detection
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/watchers" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "watchers": [
+    {
+      "deviceId": "device123",
+      "active": true,
+      "path": "/data/gallery/device123/incoming",
+      "lastActivity": "2024-03-20T10:30:00Z"
+    },
+    {
+      "deviceId": "device456",
+      "active": true,
+      "path": "/data/gallery/device456/incoming",
+      "lastActivity": null
+    }
+  ]
+}
+```
+
+## Check device watcher status
+
+<Card title="GET /api/watchers/:deviceId/status" icon="circle-check">
+  Check if a specific device has an active watcher
+</Card>
+
+### Path parameters
+
+<ParamField path="deviceId" type="string" required>
+  Device identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="active" type="boolean" required>
+  Whether the watcher is active for this device
+</ResponseField>
+
+<ResponseField name="deviceId" type="string" required>
+  Device identifier
+</ResponseField>
+
+<ResponseField name="path" type="string">
+  Path being monitored (if active)
+</ResponseField>
+
+### Example request
+
+```bash
+curl "http://localhost:8001/api/watchers/device123/status" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "active": true,
+  "deviceId": "device123",
+  "path": "/data/gallery/device123/incoming"
+}
+```
+
+## Add watcher
+
+<Card title="POST /api/watchers/:deviceId/add" icon="plus">
+  Add a file watcher for a specific device
+</Card>
+
+### Path parameters
+
+<ParamField path="deviceId" type="string" required>
+  Device identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the watcher was added successfully
+</ResponseField>
+
+<ResponseField name="deviceId" type="string" required>
+  Device identifier
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/watchers/device123/add" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "deviceId": "device123"
+}
+```
+
+## Remove watcher
+
+<Card title="DELETE /api/watchers/:deviceId" icon="trash">
+  Remove the file watcher for a specific device
+</Card>
+
+### Path parameters
+
+<ParamField path="deviceId" type="string" required>
+  Device identifier
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the watcher was removed successfully
+</ResponseField>
+
+<ResponseField name="deviceId" type="string" required>
+  Device identifier
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X DELETE "http://localhost:8001/api/watchers/device123" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "deviceId": "device123"
+}
+```
+
+## Sync watchers
+
+<Card title="POST /api/watchers/sync" icon="rotate">
+  Synchronize watchers with the current device list
+</Card>
+
+### Description
+
+This endpoint:
+- Adds watchers for devices that don't have one
+- Removes watchers for devices that no longer exist
+- Ensures all active devices are being monitored
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if synchronization was successful
+</ResponseField>
+
+<ResponseField name="added" type="number">
+  Number of watchers added
+</ResponseField>
+
+<ResponseField name="removed" type="number">
+  Number of watchers removed
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/watchers/sync" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "added": 2,
+  "removed": 1
+}
+```
+
+## Refresh watchers
+
+<Card title="POST /api/watchers/refresh" icon="arrows-rotate">
+  Restart all file watchers
+</Card>
+
+### Description
+
+Useful after configuration changes or to recover from errors. This endpoint:
+- Stops all active watchers
+- Restarts watchers for all devices
+- Reloads configuration
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if refresh was successful
+</ResponseField>
+
+<ResponseField name="count" type="number">
+  Number of watchers restarted
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/watchers/refresh" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "count": 5
+}
+```
+
+## Clean up orphaned watchers
+
+<Card title="POST /api/watchers/cleanup-orphaned" icon="broom">
+  Manually clean up watchers for deleted devices
+</Card>
+
+### Description
+
+Removes watchers for devices that no longer exist in the database. This is automatically done during periodic sync, but can be triggered manually.
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if cleanup was successful
+</ResponseField>
+
+<ResponseField name="removed" type="number">
+  Number of orphaned watchers removed
+</ResponseField>
+
+### Example request
+
+```bash
+curl -X POST "http://localhost:8001/api/watchers/cleanup-orphaned" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "removed": 3
+}
+```
+
+## File watcher behavior
+
+### Detection
+
+When a file watcher detects a new file in the incoming directory:
+
+1. **File detection** - New file appears in incoming directory
+2. **Metadata extraction** - File size, type, and name are determined
+3. **Gallery record creation** - Database record is created
+4. **Thumbnail processing** - Checks for matching thumbnail file
+5. **File movement** - Moves file from incoming to processed directory
+6. **Hook execution** - Triggers `on_file_detected` hooks
+
+### Monitoring
+
+File watchers monitor the incoming directory continuously and:
+- Detect new files immediately
+- Handle multiple files concurrently
+- Skip temporary and hidden files
+- Process files atomically to avoid race conditions
+
+### Error handling
+
+If a watcher encounters an error:
+- Error is logged with details
+- Watcher attempts automatic recovery
+- `on_error` hooks are triggered
+- Problematic files are quarantined

@@ -1,0 +1,241 @@
+---
+title: Notifications
+description: Send real-time notifications to users via WebSocket
+---
+
+The notifications API allows you to send real-time notifications to users through WebSocket connections. Notifications can be scoped to specific users or devices and support multiple severity levels.
+
+## Send notification
+
+<Card title="POST /api/notifications/send" icon="bell">
+  Send a notification to users via WebSocket
+</Card>
+
+### Authentication
+
+Requires `notifications` permission.
+
+### Request body
+
+<ParamField body="type" type="string" default="info">
+  Notification severity level
+  
+  Options: `info`, `success`, `warning`, `error`, `emergency`
+</ParamField>
+
+<ParamField body="title" type="string" required>
+  Notification title displayed prominently
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  Detailed notification message content
+</ParamField>
+
+<ParamField body="userId" type="string">
+  Target a specific user by ID. If omitted and user is not a superuser, notification is sent only to the authenticated user.
+</ParamField>
+
+<ParamField body="deviceId" type="string">
+  Associate the notification with a specific device
+</ParamField>
+
+<ParamField body="dismissible" type="boolean" default={true}>
+  Whether the user can dismiss the notification
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Additional custom data to include with the notification
+  
+  Example:
+  ```json
+  {
+    "actionId": "action123",
+    "timestamp": "2024-03-20T10:30:00Z"
+  }
+  ```
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates whether the notification was sent successfully
+</ResponseField>
+
+<ResponseField name="notificationId" type="string">
+  Unique identifier for the sent notification
+</ResponseField>
+
+<ResponseField name="recipientCount" type="number">
+  Number of active WebSocket clients that received the notification
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if the notification failed to send
+</ResponseField>
+
+### Example: Send info notification
+
+```bash
+curl -X POST http://localhost:8000/api/notifications/send \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "info",
+    "title": "Device Connected",
+    "message": "Device Camera-01 has successfully connected",
+    "deviceId": "device123"
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "notificationId": "notif_abc123",
+  "recipientCount": 3
+}
+```
+
+### Example: Send error notification
+
+```bash
+curl -X POST http://localhost:8000/api/notifications/send \
+  -H "X-API-Key: dev-api-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "error",
+    "title": "Action Failed",
+    "message": "Failed to execute capture action: Connection timeout",
+    "deviceId": "device123",
+    "dismissible": true,
+    "metadata": {
+      "actionName": "capture",
+      "errorCode": "TIMEOUT"
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "notificationId": "notif_xyz789",
+  "recipientCount": 1
+}
+```
+
+### Example: Send user-specific notification
+
+```bash
+curl -X POST http://localhost:8000/api/notifications/send \
+  -H "Authorization: Bearer SUPERUSER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "success",
+    "title": "Task Completed",
+    "message": "Your scheduled task has completed successfully",
+    "userId": "user456"
+  }'
+```
+
+## Notification types
+
+### info
+General informational messages about system status or activities.
+
+### success
+Positive confirmation messages for successful operations.
+
+### warning
+Cautionary messages about potential issues that don't prevent operation.
+
+### error
+Error messages about failed operations or problems requiring attention.
+
+### emergency
+Critical alerts requiring immediate attention.
+
+## WebSocket connection
+
+To receive notifications, clients must establish a WebSocket connection:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/notifications');
+
+ws.onopen = () => {
+  console.log('Connected to notification stream');
+};
+
+ws.onmessage = (event) => {
+  const notification = JSON.parse(event.data);
+  console.log('Received notification:', notification);
+};
+
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+  console.log('Disconnected from notification stream');
+};
+```
+
+## Notification message format
+
+Notifications received via WebSocket have the following structure:
+
+```json
+{
+  "id": "notif_abc123",
+  "type": "error",
+  "title": "Action Failed",
+  "message": "Failed to execute capture action: Connection timeout",
+  "userId": "user123",
+  "deviceId": "device456",
+  "dismissible": true,
+  "metadata": {
+    "actionName": "capture",
+    "errorCode": "TIMEOUT"
+  },
+  "timestamp": "2024-03-20T10:30:00Z"
+}
+```
+
+## User targeting
+
+### Superuser notifications
+Superusers can send notifications to any user by specifying the `userId` field.
+
+### Regular user notifications
+Regular users can only send notifications to themselves. The `userId` field is automatically set to the authenticated user's ID.
+
+### Broadcast notifications
+Superusers can omit the `userId` field to broadcast notifications to all connected clients.
+
+## Error responses
+
+### 401 Unauthorized
+
+```json
+{
+  "error": "Authentication required"
+}
+```
+
+### 403 Forbidden
+
+```json
+{
+  "error": "Missing required permissions: notifications"
+}
+```
+
+### 500 Internal server error
+
+```json
+{
+  "error": "Failed to send notification"
+}
+```

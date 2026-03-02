@@ -1,0 +1,312 @@
+---
+title: Switcher service
+description: Automatic slot switching and stream management service
+---
+
+Switcher manages device streaming modes and provides automatic failover between primary and secondary network connections through health-based slot switching.
+
+## Overview
+
+The Switcher service handles MediaMTX stream configuration and automatic slot switching for devices with dual connection slots. It monitors device health and switches to backup connections when failures are detected.
+
+## Configuration
+
+### Docker Compose
+
+```yaml
+switcher:
+  image: ghcr.io/skylineagle/joystick/switcher:latest
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    - STREAM_API_URL=http://host.docker.internal:9997
+    - POCKETBASE_URL=http://pocketbase:8090
+    - JOYSTICK_API_URL=http://joystick:8000
+    - JOYSTICK_API_KEY=dev-api-key-12345
+    - SLOT_HEALTH_CHECK_INTERVAL=30
+    - PORT=8080
+  depends_on:
+    pocketbase:
+      condition: service_healthy
+    mediamtx:
+      condition: service_started
+  networks:
+    - app-network
+```
+
+### Environment variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8080` |
+| `STREAM_API_URL` | MediaMTX API endpoint | Required |
+| `POCKETBASE_URL` | PocketBase connection URL | Required |
+| `JOYSTICK_API_URL` | Joystick service URL | Required |
+| `JOYSTICK_API_KEY` | API key for Joystick | Required |
+| `SLOT_HEALTH_CHECK_INTERVAL` | Health check interval (seconds) | `30` |
+
+## Features
+
+### Stream mode management
+
+Manages three device modes:
+
+- **live** - Active streaming via MediaMTX
+- **off** - No streaming, path removed
+- **auto** - Automatic mode (path removed)
+
+### Automatic slot switching
+
+Provides failover capabilities for dual-slot devices:
+
+- **Health monitoring** - Checks both primary and secondary slots
+- **Automatic failover** - Switches after 2 consecutive failures
+- **Auto-recovery** - Returns to original slot when healthy
+- **Seamless transition** - Updates stream URLs automatically
+
+## API endpoints
+
+### Mode management
+
+#### Set device mode
+
+```http
+POST /api/mode/:device/:mode
+```
+
+Set device streaming mode.
+
+**Parameters:**
+- `device` - Device ID
+- `mode` - One of: `live`, `off`, `auto`
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/api/mode/device123/live" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Slot management
+
+#### Switch slot manually
+
+```http
+POST /api/slot/:device/:slot
+```
+
+Manually switch device to specific slot.
+
+**Parameters:**
+- `device` - Device ID
+- `slot` - Either `primary` or `secondary`
+
+**Response:**
+```json
+{
+  "success": true,
+  "activeSlot": "secondary"
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/api/slot/device123/secondary" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Health monitoring
+
+#### Get health status
+
+```http
+GET /api/health
+```
+
+Get service health status.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "service": "switcher",
+  "uptime": 12345,
+  "timestamp": "2024-03-20T10:00:00Z",
+  "memory": {},
+  "version": "0.0.0"
+}
+```
+
+#### Trigger health check
+
+```http
+POST /api/health/check
+```
+
+Manually trigger health checks for all monitored devices.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Health checks completed"
+}
+```
+
+## Slot switching system
+
+### How it works
+
+1. **Service startup** - Switcher starts health check loop
+2. **Device discovery** - Finds devices with `autoSlotSwitch=true`
+3. **Health testing** - Runs `slot-check` action on both slots
+4. **Failure detection** - Tracks consecutive failures
+5. **Automatic switching** - Switches after 2 failures to healthy slot
+6. **Database update** - Updates device `activeSlot` field
+7. **Stream update** - PocketBase hook updates stream configuration
+8. **Notification** - Users notified of slot change
+
+### Health check process
+
+The service runs health checks every 30 seconds (configurable):
+
+```typescript
+const healthy = await runSlotCheckAction(device, host);
+```
+
+Health checks use the `slot-check` action configured in PocketBase, typically a ping or connectivity test.
+
+### Failover scenarios
+
+#### Primary slot failure
+
+1. Primary slot health check fails
+2. Failure counter increments
+3. After 2 failures, check secondary slot health
+4. If secondary is healthy, switch to secondary
+5. Stream URLs updated to use secondary host
+6. Health checks continue on both slots
+
+#### Recovery
+
+1. Original failed slot becomes healthy
+2. System can switch back to preferred slot
+3. Seamless transition with minimal interruption
+
+## Device configuration
+
+To enable automatic slot switching:
+
+1. Configure primary connection (host, phone)
+2. Enable "Configure Secondary Connection Slot"
+3. Configure secondary connection (secondSlotHost, secondSlotPhone)
+4. Enable "Enable automatic slot switching"
+5. Save configuration
+
+**Device information schema:**
+```json
+{
+  "host": "192.168.1.100",
+  "phone": "10.0.0.1",
+  "secondSlotHost": "192.168.1.101",
+  "secondSlotPhone": "10.0.0.2",
+  "autoSlotSwitch": true,
+  "activeSlot": "primary"
+}
+```
+
+## MediaMTX integration
+
+Switcher manages MediaMTX stream paths:
+
+### Add device path
+
+```typescript
+await fetch(`${STREAM_API_URL}/v3/config/paths/add/${deviceName}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(configuration)
+});
+```
+
+### Delete device path
+
+```typescript
+await fetch(`${STREAM_API_URL}/v3/config/paths/delete/${deviceName}`, {
+  method: 'DELETE'
+});
+```
+
+## Initialization
+
+On startup, Switcher initializes all devices in "live" mode:
+
+```typescript
+const devices = await pb.collection('devices').getFullList();
+
+for (const device of devices) {
+  if (device.mode === 'live') {
+    await addDevice(device.configuration.name, device.configuration);
+  }
+}
+```
+
+## Monitoring and logging
+
+The service provides detailed logging:
+
+```javascript
+logger.info(`Performing health checks on ${devices.length} devices`);
+logger.info(`Switching device ${deviceId} from ${currentSlot} to ${alternateSlot}`);
+logger.error(`Failed to switch device ${deviceId} slot: ${error}`);
+```
+
+## Troubleshooting
+
+### Health checks not running
+
+- Verify `SLOT_HEALTH_CHECK_INTERVAL` is set
+- Check switcher service logs
+- Ensure devices have `autoSlotSwitch` enabled
+
+### Slot switching not working
+
+- Verify secondary slot configuration
+- Check `slot-check` action exists in database
+- Verify API connectivity between services
+
+### Debug commands
+
+```bash
+# Check service health
+curl http://localhost:8080/api/health
+
+# Trigger manual health check
+curl -X POST http://localhost:8080/api/health/check
+
+# Manual slot switch
+curl -X POST http://localhost:8080/api/slot/device123/secondary
+```
+
+## Performance impact
+
+- Health checks run every 30 seconds by default
+- Minimal network overhead (simple connectivity tests)
+- Failover typically completes within 1-2 check cycles
+- No impact on streaming during normal operation
+
+## Traefik routing
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.switcher.rule=Host(${HOST}) && PathPrefix(`/switcher`)"
+  - "traefik.http.middlewares.switcher-strip.stripprefix.prefixes=/switcher"
+  - "traefik.http.routers.switcher.middlewares=switcher-strip,cors"
+```

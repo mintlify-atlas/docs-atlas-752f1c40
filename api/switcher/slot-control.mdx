@@ -1,0 +1,211 @@
+---
+title: Slot control
+description: Manual slot switching for dual-connection devices
+---
+
+The slot control endpoint allows manual switching between primary and secondary network connections for devices with dual connection slots.
+
+## Switch device slot
+
+<Card title="POST /api/slot/:deviceId/:slot" icon="toggle-on">
+  Manually switch a device to a specific connection slot
+</Card>
+
+### Path parameters
+
+<ParamField path="deviceId" type="string" required>
+  Device identifier
+</ParamField>
+
+<ParamField path="slot" type="string" required>
+  Target slot to switch to
+  
+  Options: `primary`, `secondary`
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Indicates if the slot switch was successful
+</ResponseField>
+
+<ResponseField name="deviceId" type="string" required>
+  Device identifier
+</ResponseField>
+
+<ResponseField name="activeSlot" type="string" required>
+  The slot that is now active
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if the switch failed
+</ResponseField>
+
+### Example: Switch to secondary slot
+
+```bash
+curl -X POST "http://localhost:8080/api/slot/device123/secondary" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "deviceId": "device123",
+  "activeSlot": "secondary"
+}
+```
+
+### Example: Switch to primary slot
+
+```bash
+curl -X POST "http://localhost:8080/api/slot/device123/primary" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "deviceId": "device123",
+  "activeSlot": "primary"
+}
+```
+
+## Slot switching behavior
+
+### Pre-switch validation
+
+Before switching, the system validates:
+
+1. **Device exists** - Device ID is valid and device exists in database
+2. **Slot configured** - The target slot has connection details configured
+3. **Slot availability** - The target slot is reachable and healthy
+
+### Post-switch actions
+
+After a successful slot switch:
+
+1. **Database update** - Device `activeSlot` field is updated
+2. **Stream URL update** - PocketBase hook updates stream URLs to use new slot's host
+3. **Notification sent** - Users are notified about the slot change
+4. **Health check reset** - Failure counters are reset for the new slot
+
+### Automatic failback
+
+When automatic slot switching is enabled and a manual switch is performed:
+
+- Health checks continue on both slots
+- System can automatically switch back if the original slot recovers
+- Manual switches take precedence over automatic failover temporarily
+
+## Error responses
+
+### 400 Invalid slot
+
+```json
+{
+  "success": false,
+  "error": "Invalid slot: must be 'primary' or 'secondary'"
+}
+```
+
+### 404 Device not found
+
+```json
+{
+  "success": false,
+  "error": "Device not found: device123"
+}
+```
+
+### 400 Slot not configured
+
+```json
+{
+  "success": false,
+  "error": "Secondary slot not configured for device123"
+}
+```
+
+### 503 Slot unavailable
+
+```json
+{
+  "success": false,
+  "error": "Target slot is not responding to health checks"
+}
+```
+
+## Use cases
+
+### Testing failover
+
+Manually switch slots to test failover behavior:
+
+```bash
+# Switch to secondary
+curl -X POST "http://localhost:8080/api/slot/device123/secondary" \
+  -H "X-API-Key: dev-api-key-12345"
+
+# Verify stream is working
+# ...
+
+# Switch back to primary
+curl -X POST "http://localhost:8080/api/slot/device123/primary" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+### Maintenance mode
+
+Switch to alternate slot before performing maintenance:
+
+```bash
+# Move to secondary before maintenance
+curl -X POST "http://localhost:8080/api/slot/device123/secondary" \
+  -H "X-API-Key: dev-api-key-12345"
+
+# Perform maintenance on primary connection
+# ...
+
+# Return to primary after maintenance
+curl -X POST "http://localhost:8080/api/slot/device123/primary" \
+  -H "X-API-Key: dev-api-key-12345"
+```
+
+### Load balancing
+
+Distribute devices across different network connections:
+
+```bash
+# Switch half of devices to secondary
+for device in device1 device3 device5; do
+  curl -X POST "http://localhost:8080/api/slot/$device/secondary" \
+    -H "X-API-Key: dev-api-key-12345"
+done
+```
+
+## Integration with health checks
+
+Manual slot switching works alongside automatic health check failover:
+
+- **Manual override** - Manual switches are respected by health checks
+- **Continued monitoring** - Health checks continue on both slots
+- **Automatic recovery** - If enabled, system can auto-switch when conditions improve
+- **Status visibility** - Use health check endpoints to monitor both slots
+
+## Slot configuration
+
+For slot switching to work, devices must have both slots configured:
+
+### Primary slot
+- `host` - Primary connection hostname or IP
+- `phone` - Primary phone number for cellular connection
+
+### Secondary slot
+- `secondSlotHost` - Secondary connection hostname or IP  
+- `secondSlotPhone` - Secondary phone number for cellular connection
+- `autoSlotSwitch` - Enable automatic failover (optional)

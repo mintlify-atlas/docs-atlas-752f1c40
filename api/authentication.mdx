@@ -1,0 +1,133 @@
+---
+title: Authentication
+description: Authentication methods and token management for the Joystick API
+---
+
+The Joystick API supports multiple authentication methods to secure access to device control, sensor data, and notification endpoints.
+
+## Authentication methods
+
+### JWT bearer token
+
+The primary authentication method uses JWT tokens obtained from PocketBase user authentication. This is the recommended method for production applications.
+
+**Obtain a token:**
+
+```bash
+curl -X POST http://localhost:8090/api/collections/users/auth-with-password \
+  -H "Content-Type: application/json" \
+  -d '{"identity": "user@example.com", "password": "password"}'
+```
+
+**Use the token in API requests:**
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/capture \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{"quality": "high"}'
+```
+
+### Query parameter token
+
+For scenarios where setting headers is difficult, you can pass the JWT token as a query parameter:
+
+```bash
+curl -X POST "http://localhost:8000/api/run/device123/capture?token=YOUR_JWT_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{"quality": "high"}'
+```
+
+### API key
+
+API keys are useful for development, testing, and service-to-service communication. Use the `X-API-Key` header:
+
+```bash
+curl -X POST http://localhost:8000/api/run/device123/capture \
+  -H "X-API-Key: dev-api-key-12345" \
+  -H "Content-Type: application/json" \
+  -d '{"quality": "high"}'
+```
+
+**Custom API key:**
+
+Set a custom API key using the `JOYSTICK_API_KEY` environment variable:
+
+```bash
+export JOYSTICK_API_KEY=your-custom-api-key
+```
+
+## Security schemes
+
+The API supports two OpenAPI security schemes:
+
+<ParamField header="Authorization" type="string">
+  Bearer token authentication using JWT from PocketBase
+  
+  Format: `Bearer <token>`
+</ParamField>
+
+<ParamField header="X-API-Key" type="string">
+  API key authentication for development and service-to-service communication
+  
+  Default development key: `dev-api-key-12345`
+</ParamField>
+
+## Access control
+
+### Device access
+
+Users can only control devices they have explicit access to. Device access is managed through the `allow` field in the devices collection, which contains an array of authorized user IDs.
+
+### Permission-based access
+
+Certain endpoints require specific feature-based permissions:
+
+- **device-cpsi** - Access to CPSI sensor data
+- **device-battery** - Access to battery sensor data
+- **device-gps** - Access to GPS sensor data
+- **device-imu** - Access to IMU sensor data
+- **notifications** - Ability to send notifications
+
+## Error responses
+
+### 401 Unauthorized
+
+Returned when no valid authentication credentials are provided:
+
+```json
+{
+  "success": false,
+  "error": "Authentication required"
+}
+```
+
+### 403 Forbidden - Missing permissions
+
+Returned when the authenticated user lacks required permissions:
+
+```json
+{
+  "success": false,
+  "error": "Missing required permissions: device-cpsi"
+}
+```
+
+### 403 Forbidden - Device access denied
+
+Returned when the user doesn't have access to the specified device:
+
+```json
+{
+  "success": false,
+  "error": "Access denied: You don't have permission to control this device"
+}
+```
+
+## Public endpoints
+
+The following endpoints do not require authentication:
+
+- `GET /` - API welcome message
+- `GET /api/health` - Service health check
+- `GET /swagger` - Interactive API documentation
