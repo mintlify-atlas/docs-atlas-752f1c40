@@ -1,0 +1,149 @@
+{
+  "projectType": "saas",
+  "projectName": "Joystick",
+  "projectDescription": "IoT device management platform with remote control, video streaming, media management, and automated failover capabilities",
+  "theme": "aspen",
+  "primaryColor": "#0ea5e9",
+  "lightColor": "#38bdf8",
+  "darkColor": "#0284c7",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/devices",
+              "concepts/actions",
+              "concepts/streaming",
+              "concepts/authentication"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/device-setup",
+              "guides/stream-configuration",
+              "guides/media-management",
+              "guides/slot-switching",
+              "guides/notifications",
+              "guides/scheduling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Services",
+        "groups": [
+          {
+            "group": "Microservices",
+            "pages": [
+              "services/overview",
+              "services/joystick",
+              "services/studio",
+              "services/switcher",
+              "services/baker",
+              "services/whisper",
+              "services/panel"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "services/pocketbase",
+              "services/mediamtx",
+              "services/traefik"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Joystick API",
+            "pages": [
+              "api/authentication",
+              "api/device-control",
+              "api/sensor-data",
+              "api/notifications"
+            ]
+          },
+          {
+            "group": "Studio API",
+            "pages": [
+              "api/studio/overview",
+              "api/studio/media-management",
+              "api/studio/hooks",
+              "api/studio/file-watchers"
+            ]
+          },
+          {
+            "group": "Switcher API",
+            "pages": [
+              "api/switcher/slot-control",
+              "api/switcher/health-checks"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Deployment",
+        "groups": [
+          {
+            "group": "Setup",
+            "pages": [
+              "deployment/installation",
+              "deployment/configuration",
+              "deployment/docker-compose"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "deployment/monitoring",
+              "deployment/troubleshooting",
+              "deployment/security"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Remote device control via SSH",
+    "Video streaming management with MediaMTX",
+    "Media gallery with file-based upload and hooks",
+    "Automatic network failover for dual-connection devices",
+    "Real-time WebSocket notifications",
+    "Scheduled actions with cron-based automation",
+    "SMS gateway integration",
+    "JWT and API key authentication"
+  ],
+  "publicApiSurface": [
+    "POST /api/run/:device/:action - Execute device actions",
+    "GET /api/ping/:device - Check device connectivity",
+    "GET /api/cpsi - Get CPSI sensor data",
+    "GET /api/battery - Get battery telemetry",
+    "GET /api/gps - Get GPS coordinates",
+    "GET /api/imu - Get IMU sensor data",
+    "POST /api/notifications/send - Send notifications",
+    "GET /api/gallery/:device/events - List media events",
+    "POST /api/gallery/:device/upload - Upload media files",
+    "POST /api/gallery/:device/start - Start media service",
+    "GET /api/hooks - List event hooks",
+    "POST /api/hooks - Create event hook",
+    "GET /api/watchers - Get file watcher status",
+    "POST /api/slot/:deviceId/:slot - Switch device slot",
+    "GET /api/health/:deviceId - Get slot health status"
+  ]
+}
